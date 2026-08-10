@@ -45,6 +45,12 @@
     const CONFIG = {
         // --- Réponses ---
         reply: {
+            // Présentation de la citation :
+            //   'rail'   la citation fait corps avec le message, un filet vertical dans
+            //            la couleur de grade court le long de l'ensemble
+            //   'inline' la citation est juste la première ligne du message, sans filet
+            //   'card'   la citation est un bloc détaché avec son propre fond
+            style: 'rail',
             // Fond du message qui répond à quelqu'un. Volontairement exprimé en blanc
             // semi-transparent : il s'ajoute au fond existant, donc il reste visible
             // par-dessus les couleurs de highlight 7TV (modo, VIP, first-time…).
@@ -61,6 +67,9 @@
             showIcon: true,
             // Reconstruit les emotes dans la citation (Twitch n'y met que du texte brut).
             renderEmotes: true,
+            // Recolore le « @pseudo » cité avec sa vraie couleur de chat, pour repérer
+            // d'un coup d'œil à qui le message répond.
+            colorQuotedName: true,
             emoteHeight: '1.5em',
             // Épaisseur de la barre de couleur reprise du grade 7TV.
             accentWidth: '2px',
@@ -169,9 +178,52 @@
     // =========================================================================
     // CSS
     // =========================================================================
+    /**
+     * Trois façons de présenter la citation. Elles partagent le même HTML : seule la
+     * mise en forme change, via CONFIG.reply.style.
+     *
+     *  rail   — la citation fait corps avec le message : aucun cadre, aucun fond propre,
+     *           un filet vertical dans la couleur de grade court le long de l'ensemble.
+     *  inline — encore plus léger : la citation est simplement la première ligne du
+     *           message, en gris et plus petite. Aucun filet.
+     *  card   — la citation est un bloc détaché avec son propre fond et sa bordure.
+     */
+    const buildReplyStyles = (r) => ({
+        rail: `
+        /* Le filet est un box-shadow interne : contrairement à une bordure, il ne
+           décale pas le texte et se superpose proprement à celui de 7TV. */
+        .chat-line__message.btc-reply {
+            box-shadow: inset ${r.accentWidth} 0 0 0 var(--btc-reply-accent);
+        }
+        .btc-reply-slot {
+            background: none !important;
+            border: 0 !important;
+            padding: 0 !important;
+            margin: 0 0 1px 0 !important;
+        }`,
+
+        inline: `
+        .btc-reply-slot {
+            background: none !important;
+            border: 0 !important;
+            padding: 0 !important;
+            margin: 0 0 1px 0 !important;
+        }`,
+
+        card: `
+        .btc-reply-slot {
+            background-image: linear-gradient(var(--btc-reply-block-tint), var(--btc-reply-block-tint));
+            border-left: ${r.accentWidth} solid var(--btc-reply-accent);
+            border-radius: 2px;
+            padding: 2px 6px !important;
+            margin: 1px 0 3px 0 !important;
+        }`
+    });
+
     const buildCSS = () => {
         const r = CONFIG.reply;
         const c = CONFIG.compact;
+        const REPLY_STYLES = buildReplyStyles(r);
         return `
         :root {
             --btc-reply-line-tint: ${r.lineTint};
@@ -189,14 +241,9 @@
             background-image: linear-gradient(var(--btc-reply-line-tint), var(--btc-reply-line-tint));
         }
 
-        /* ---------- 2. Bloc de citation ---------- */
-        .btc-reply-slot {
-            background-image: linear-gradient(var(--btc-reply-block-tint), var(--btc-reply-block-tint));
-            border-left: ${r.accentWidth} solid var(--btc-reply-accent);
-            border-radius: 2px;
-            padding: 2px 6px 2px 6px !important;
-            margin: 1px 0 3px 0 !important;
-        }
+        /* ---------- 2. Citation ---------- */
+        ${REPLY_STYLES[r.style] || REPLY_STYLES.rail}
+
         .btc-reply-slot > * {
             align-items: flex-start !important;
         }
@@ -233,6 +280,10 @@
         .btc-reply-quote .btc-reply-mention {
             color: inherit !important;
             font-weight: 600 !important;
+        }
+        .btc-reply-quote .btc-reply-target {
+            font-weight: 700 !important;
+            opacity: 0.9;
         }
         .btc-reply-slot svg {
             width: 1.15em !important;
@@ -389,6 +440,45 @@
     };
 
     // =========================================================================
+    // INDEX DES COULEURS DE PSEUDO
+    // La citation ne contient que « @pseudo » en texte brut. On mémorise la couleur
+    // de chat de chaque personne vue passer pour pouvoir la recolorer : on identifie
+    // alors d'un coup d'œil à qui le message répond.
+    // =========================================================================
+    const NAME_INDEX_MAX = 400;
+    const nameColors = new Map(); // pseudo en minuscules -> couleur
+
+    const indexNameColors = (root) => {
+        if (!CONFIG.reply.colorQuotedName) return;
+        let nodes;
+        try { nodes = root.querySelectorAll(SEL.username); } catch (e) { return; }
+        for (const el of nodes) {
+            const login = (el.dataset.seventvUserLogin || el.dataset.aUser || el.textContent || '')
+                .trim().toLowerCase();
+            if (!login) continue;
+            const color = el.style.color || el.dataset.seventvChatColor;
+            if (!color) continue;
+            if (nameColors.has(login)) continue;
+            if (nameColors.size >= NAME_INDEX_MAX) {
+                nameColors.delete(nameColors.keys().next().value);
+            }
+            nameColors.set(login, color);
+        }
+    };
+
+    /** Recolore le « @pseudo » de la citation avec la couleur de chat de la personne. */
+    const colorQuotedName = (quote) => {
+        if (!CONFIG.reply.colorQuotedName) return;
+        const span = quote.querySelector(':scope > span');
+        if (!span) return;
+        const login = span.textContent.trim().replace(/^@/, '').toLowerCase();
+        if (!login) return;
+        span.classList.add('btc-reply-target');
+        const color = nameColors.get(login);
+        if (color) span.style.color = color;
+    };
+
+    // =========================================================================
     // RÉPONSES
     // =========================================================================
 
@@ -528,6 +618,7 @@
         }
 
         if (CONFIG.reply.hidePrefix) stripReplyPrefix(quote);
+        colorQuotedName(quote);
 
         if (CONFIG.reply.renderEmotes) {
             const target = findQuoteTextNode(quote) || quote;
@@ -730,6 +821,7 @@
         if (!element || element.nodeType !== Node.ELEMENT_NODE) return;
 
         indexEmotes(element);
+        indexNameColors(element);
 
         // Notices système 7TV (exclusions, suppressions) — toujours en anglais.
         if (element.matches?.(SEL.systemNotice)) {

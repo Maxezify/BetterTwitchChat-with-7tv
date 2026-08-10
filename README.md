@@ -7,8 +7,9 @@ Userscript Tampermonkey qui rend le chat de Twitch plus lisible, compatible avec
 
 | | |
 |---|---|
-| **Réponses mises en valeur** | Le message qui répond à quelqu'un reçoit un fond légèrement plus clair, et la citation est encadrée dans un bloc à part. |
+| **Réponses mises en valeur** | Le message qui répond à quelqu'un reçoit un fond légèrement plus clair. La citation fait corps avec le message, sans cadre détaché. |
 | **Citation lisible en entier** | Twitch tronque la citation à une seule ligne avec des points de suspension. Elle est désormais affichée intégralement, en police un peu plus petite et en gris. |
+| **Pseudo cité coloré** | Le « @pseudo » de la citation reprend la couleur de chat de la personne, pour voir d'un coup d'œil à qui le message répond. |
 | **Emotes dans les citations** | Twitch ne met que du texte brut dans la citation. Le script indexe les emotes (7TV et Twitch) qui passent dans le chat et les réaffiche dans les réponses. |
 | **Notices compactées** | Subs, Primes, resubs, gifts et raids passent en police réduite avec des marges serrées. L'illustration « cadeau mystère » de 96 px devient une vignette de 26 px. |
 | **Gifts multiples regroupés** | « X offre 50 abonnements » absorbe les « X a offert un abonnement à Y » qui suivent et affiche la liste des destinataires sur une seule notice. |
@@ -25,13 +26,15 @@ Userscript Tampermonkey qui rend le chat de Twitch plus lisible, compatible avec
 Tout est regroupé dans le bloc `CONFIG` en haut du fichier :
 
 ```js
-reply.lineTint      // fond du message qui répond
-reply.blockTint     // fond du bloc de citation
-reply.color         // couleur du texte cité
-reply.fontScale     // taille de la citation (0.92 = 92 % du texte normal)
-reply.hidePrefix    // retire « Répond à », garde « @pseudo : texte »
-reply.showIcon      // garde la bulle SVG à gauche de la citation
-reply.renderEmotes  // reconstruit les emotes dans la citation
+reply.style           // 'rail' | 'inline' | 'card' — voir ci-dessous
+reply.lineTint        // fond du message qui répond
+reply.blockTint       // fond du bloc de citation (style 'card' uniquement)
+reply.color           // couleur du texte cité
+reply.fontScale       // taille de la citation (0.92 = 92 % du texte normal)
+reply.hidePrefix      // retire « Répond à », garde « @pseudo : texte »
+reply.showIcon        // garde la bulle SVG à gauche de la citation
+reply.renderEmotes    // reconstruit les emotes dans la citation
+reply.colorQuotedName // recolore le « @pseudo » cité
 
 compact.enabled        // compactage des notices sub/prime/gift
 compact.aggregateGifts // regroupement des gifts multiples
@@ -43,7 +46,20 @@ debug        // journalise les détections dans la console
 ```
 
 Depuis la console du navigateur, `window.__BTC` expose `config`, `reload()`,
-`emotes` et `gifts` pour ajuster en direct.
+`emotes` et `gifts` pour ajuster en direct. Par exemple, pour essayer une autre
+présentation de citation sans recharger :
+
+```js
+__BTC.config.reply.style = 'inline'; __BTC.reload();
+```
+
+### Présentation de la citation (`reply.style`)
+
+| Valeur | Rendu |
+|---|---|
+| `rail` *(défaut)* | La citation fait corps avec le message : aucun cadre, aucun fond propre. Un filet vertical dans la couleur de grade court le long de l'ensemble, et marque les réponses même sans highlight 7TV. |
+| `inline` | Identique, mais sans filet neutre : seule la couleur posée par 7TV apparaît. Le rendu le plus discret. |
+| `card` | La citation est un bloc détaché avec son propre fond et sa bordure. |
 
 ## Note sur les couleurs de grade
 

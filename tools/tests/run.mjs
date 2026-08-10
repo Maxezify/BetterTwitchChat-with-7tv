@@ -39,8 +39,11 @@ const withInlineImage = (html) => html.replace(/src="https:\/\/static-cdn[^"]*"/
 const EMOTE_NAME = (LINES.emoteMessage.match(/data-emote-name="([^"]+)"/) || [])[1];
 const LONG_TEXT = `regarde ça ${EMOTE_NAME} @alice c'est un message vraiment très long qui doit s'afficher en entier sans être coupé par une ellipse au bout d'une seule ligne`;
 
+// La citation vise MentionUser01, qui figure déjà dans la fixture statique : sa
+// couleur de chat est donc connue au moment où la réponse arrive.
 const replyWithEmote = LINES.replyMod
     .replace(/<p title="[^"]*"/, `<p title="${LONG_TEXT}"`)
+    .replace(/(Répond à <span dir="auto">)@[^<]*(<\/span>)/, '$1@MentionUser01$2')
     .replace(/(<span dir="auto">)!time(<\/span>)/, `$1${LONG_TEXT}$2`);
 
 const highlightedReply = LINES.replyMod
@@ -146,8 +149,17 @@ const r = await page.evaluate(() => {
         emoteFrom7tv: /cdn\.7tv\.app/.test((q('.btc-reply-quote .btc-reply-emote') || {}).src || ''),
         mentions: qa('.btc-reply-quote .btc-reply-mention').length,
         gradeAccent: hl ? hl.style.getPropertyValue('--btc-reply-accent') : '',
-        slotBorderColor: hlSlot ? getComputedStyle(hlSlot).borderLeftColor : '',
-        slotTinted: hlSlot ? getComputedStyle(hlSlot).backgroundImage !== 'none' : false,
+        // Style « rail » : la citation n'a plus de cadre propre, l'accent est porté
+        // par un box-shadow interne sur toute la ligne.
+        slotHasOwnBox: hlSlot
+            ? (getComputedStyle(hlSlot).backgroundImage !== 'none'
+               || parseFloat(getComputedStyle(hlSlot).borderLeftWidth) > 0)
+            : true,
+        lineBoxShadow: hl ? getComputedStyle(hl).boxShadow : '',
+        quotedNameColored: (() => {
+            const t = document.querySelector('.btc-reply-quote .btc-reply-target');
+            return t ? t.style.color : '';
+        })(),
         noticeFontSize: noticeLine ? getComputedStyle(noticeLine).fontSize : '',
         resubCustomFontSize: resubCustom ? getComputedStyle(resubCustom).fontSize : '',
         massImgWidth: massImg ? getComputedStyle(massImg).width : '',
@@ -162,7 +174,7 @@ const r = await page.evaluate(() => {
 
 // --- 1. fond plus clair sur les messages qui répondent ---
 check('réponses détectées', r.replyLines, 3);
-check('bloc de citation teinté', r.slotTinted, true);
+check('citation sans cadre détaché (style rail)', r.slotHasOwnBox, false);
 
 // --- 2. réponse visible en entier, plus petite, grise, avec emotes ---
 check('citation non tronquée (white-space)', r.whiteSpace, 'normal');
@@ -187,7 +199,8 @@ check('notice système 7TV traduite', r.sysNoticeText, 'timedout_user a été ex
 
 // --- 4. couleur de grade 7TV reprise sur la réponse ---
 check('accent de grade capté', r.gradeAccent, 'rgb(224, 5, 185)');
-check('accent appliqué à la citation', r.slotBorderColor, 'rgb(224, 5, 185)');
+check('filet de grade sur toute la ligne', r.lineBoxShadow, (v) => /rgb\(224, 5, 185\).*inset/.test(v));
+check('pseudo cité recoloré', r.quotedNameColored, (v) => !!v && v !== 'inherit');
 
 // --- garde-fous ---
 check('racine du chat non polluée', r.rootPolluted, false);
