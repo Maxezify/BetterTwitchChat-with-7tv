@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.5.0
+// @version      15.5.1
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -45,7 +45,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.5.0';
+    const VERSION = '15.5.1';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -634,11 +634,20 @@
     const applyGradeAccent = (line) => {
         let accent = null;
         try {
-            const cs = getComputedStyle(line);
-
             // Source la plus fiable : 7TV pose la couleur de sa règle de highlight en
-            // variable inline sur la ligne. On la lit directement plutôt que de la
-            // déduire du rendu, ce qui reste juste même s'il change sa façon de peindre.
+            // variable inline sur la ligne. On lit l'attribut style directement — pas
+            // getComputedStyle, qui forcerait un recalcul de style synchrone à chaque
+            // réponse, en pleine frame d'animation.
+            const inline = (line.style.getPropertyValue('--seventv-chat-custom-highlight-border-color')
+                || line.style.getPropertyValue('--seventv-chat-custom-highlight-color')).trim();
+            if (inline) {
+                line.style.setProperty('--btc-reply-accent', inline);
+                return;
+            }
+
+            const cs = getComputedStyle(line);
+            // Repli : la couleur peut venir d'une feuille de style plutôt que d'un
+            // attribut inline. Là, seul le style calculé la connaît.
             const declared = (cs.getPropertyValue('--seventv-chat-custom-highlight-border-color')
                 || cs.getPropertyValue('--seventv-chat-custom-highlight-color')).trim();
 
@@ -932,7 +941,12 @@
     let selfCheckTimer = null;
     let selfCheckDone = false;
 
-    const runSelfCheck = ({ verbeux = false } = {}) => {
+    // Indices qu'on est bien sur une page de chaîne : sans eux, l'absence de chat est
+    // normale (page d'accueil, annuaire…) et il ne faut surtout pas alerter.
+    const PAGE_CHAT_SELECTORS = '[data-a-target="chat-input"],.chat-room,'
+        + 'section[data-test-selector="chat-room-component-layout"],[data-test-selector="chat-room"]';
+
+    const runSelfCheck = ({ verbeux = false, force = false } = {}) => {
         const sondes = [];
         const add = (nom, ok, indice) => sondes.push({ ancre: nom, ok, indice });
         const root = chatRoot;
@@ -954,7 +968,7 @@
         const cassees = sondes.filter(p => !p.ok);
         const inactif = diag.lignes === 0 && diag.notices === 0;
 
-        if (cassees.length && !inactif) {
+        if (cassees.length && (force || !inactif)) {
             console.warn(
                 `[BetterTwitchChat] ${cassees.length} ancre(s) ne correspondent plus au DOM.\n` +
                 cassees.map(p => `  ✗ ${p.ancre} — ${p.indice}`).join('\n') +
@@ -1063,7 +1077,16 @@
         retryTimer = setInterval(() => {
             const root = findChatRoot();
             if (root) { clearInterval(retryTimer); start(root); }
-            else if (++attempts > 60) clearInterval(retryTimer);
+            else if (++attempts > 60) {
+                clearInterval(retryTimer);
+                // Trou repéré après coup : l'auto-diagnostic n'était planifié que depuis
+                // start(). Si le conteneur du chat n'est jamais trouvé, start() n'est
+                // jamais appelé et la panne la plus grave restait muette — exactement ce
+                // que ce contrôle est censé empêcher.
+                if (document.querySelector(PAGE_CHAT_SELECTORS)) {
+                    runSelfCheck({ force: true });
+                }
+            }
         }, 1000);
     };
 

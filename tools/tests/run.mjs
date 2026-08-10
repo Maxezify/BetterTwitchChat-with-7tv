@@ -304,6 +304,15 @@ check('auto-diagnostic : la bonne ancre est désignée', alerte.sondes,
     (ss) => ss.some(p => p.ancre === 'bloc de citation' && !p.ok));
 check('auto-diagnostic : réponse ratée comptabilisée', alerte.compteurs.reponsesRatees, (v) => v >= 1);
 
+// Panne la plus grave : le conteneur du chat introuvable. L'auto-diagnostic n'étant
+// planifié que depuis start(), elle ne déclenchait aucun avertissement.
+const rootIntrouvable = await page.evaluate(() => {
+    const probe = window.__BTC.selfCheck.call(null);
+    return probe;
+});
+check('auto-diagnostic : sonde du conteneur présente', rootIntrouvable.sondes,
+    (ss) => ss.some(p => p.ancre === 'conteneur du chat'));
+
 // --- 6. les styles alternatifs restent fonctionnels ---
 const styleProbe = await page.evaluate(async () => {
     const line = document.querySelector('.chat-line__message.btc-reply');
