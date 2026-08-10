@@ -304,6 +304,26 @@ check('__BTC.check() rapporte la version', diag.version, (v) => /^\d+\.\d+\.\d+$
 check('__BTC.check() mesure la citation', diag.tailleCitation, '10.92px');
 check('__BTC.check() mesure le message', diag.tailleMessage, '14px');
 
+// Régression majeure : Twitch stylise la citation via une classe styled-components
+// hachée qui déclare font-size en !important, et injecte sa feuille APRÈS la nôtre.
+// À spécificité égale c'est l'ordre qui tranche, et nous perdions. On reproduit
+// exactement ce scénario : notre règle doit tenir.
+const vsTwitch = await page.evaluate(async () => {
+    const rival = document.createElement('style');
+    rival.id = 'faux-styled-components';
+    rival.textContent = '.OLUUU { font-size: 14px !important; white-space: nowrap !important;'
+        + ' overflow: hidden !important; text-overflow: ellipsis !important; }';
+    document.head.appendChild(rival);           // injectée après btc-styles
+    await new Promise(r => setTimeout(r, 60));
+    const cs = getComputedStyle(document.querySelector('.btc-reply-quote'));
+    const out = { fontSize: cs.fontSize, whiteSpace: cs.whiteSpace, overflow: cs.overflow };
+    rival.remove();
+    return out;
+});
+check('taille tenue face à un !important concurrent', vsTwitch.fontSize, '10.92px');
+check('déroulement tenu face à un !important concurrent', vsTwitch.whiteSpace, 'normal');
+check('overflow tenu face à un !important concurrent', vsTwitch.overflow, 'visible');
+
 // Le diagnostic de cascade doit désigner notre règle comme gagnante.
 const why = await page.evaluate(() => window.__BTC.whyFontSize());
 check('whyFontSize() rapporte la taille appliquée', why.applique, '10.92px');

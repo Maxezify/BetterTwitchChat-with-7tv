@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-45 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+48 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -64,6 +64,11 @@ Autres constats utiles :
 - Sur une réponse, 7TV pose `data-seventv-reply-parent-login` et
   `-display-name` sur la ligne : le login exact de la personne citée, sans avoir à
   analyser le texte de la citation.
+- Twitch stylise la citation via une classe styled-components hachée (`.OLUUU` au
+  moment où ceci est écrit) qui déclare `font-size: var(--font-size-5)` **en
+  `!important`**. Nos règles doivent donc dépasser (0,1,0) en spécificité : à égalité,
+  c'est l'ordre du document qui tranche et styled-components injecte ses feuilles après
+  la nôtre. D'où les sélecteurs à classe doublée dans le script.
 - Le réglage « Chat Font Size » de 7TV n'agit que si la classe
   `seventv-twitch-chat-font-size-enabled` est posée sur `<html>` ; il applique alors
   `font-size: var(--seventv-twitch-chat-font-size)` sur `[data-a-target="chat-line-message"]`,

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.3.2
+// @version      15.4.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -39,7 +39,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.3.2';
+    const VERSION = '15.4.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -198,10 +198,10 @@
         rail: `
         /* Le filet est un box-shadow interne : contrairement à une bordure, il ne
            décale pas le texte et se superpose proprement à celui de 7TV. */
-        .chat-line__message.btc-reply {
+        .chat-line__message.btc-reply.btc-reply {
             box-shadow: inset ${r.accentWidth} 0 0 0 var(--btc-reply-accent);
         }
-        .btc-reply-slot {
+        .btc-reply-slot.btc-reply-slot {
             background: none !important;
             border: 0 !important;
             padding: 0 !important;
@@ -209,7 +209,7 @@
         }`,
 
         inline: `
-        .btc-reply-slot {
+        .btc-reply-slot.btc-reply-slot {
             background: none !important;
             border: 0 !important;
             padding: 0 !important;
@@ -217,7 +217,7 @@
         }`,
 
         card: `
-        .btc-reply-slot {
+        .btc-reply-slot.btc-reply-slot {
             background-image: linear-gradient(var(--btc-reply-block-tint), var(--btc-reply-block-tint));
             border-left: ${r.accentWidth} solid var(--btc-reply-accent);
             border-radius: 2px;
@@ -230,6 +230,19 @@
         const r = CONFIG.reply;
         const c = CONFIG.compact;
         const REPLY_STYLES = buildReplyStyles(r);
+
+        // Spécificité renforcée. Twitch stylise la citation via une classe
+        // styled-components hachée (.OLUUU au moment où ceci est écrit) qui déclare
+        // `font-size: var(--font-size-5) !important`. À spécificité égale (0,1,0) et
+        // avec !important des deux côtés, c'est l'ordre du document qui tranche — et
+        // styled-components injecte ses feuilles après la nôtre, donc nous perdions.
+        // La classe doublée porte la spécificité à (0,2,0), le sélecteur de type à
+        // (0,2,1) : nous passons devant quel que soit l'ordre, sans dépendre du hachage
+        // de Twitch qui change à chaque build.
+        const Q = 'p.btc-reply-quote.btc-reply-quote';
+        const S = '.btc-reply-slot.btc-reply-slot';
+        const L = '.chat-line__message.btc-reply.btc-reply';
+
         return `
         :root {
             --btc-reply-line-tint: ${r.lineTint};
@@ -243,14 +256,14 @@
         /* ---------- 1. Message qui répond à quelqu'un ---------- */
         /* Teinte additive : elle se compose avec le fond posé par 7TV (highlight de
            grade, first-time chatter…) au lieu de l'écraser. */
-        .chat-line__message.btc-reply {
+        .chat-line__message.btc-reply.btc-reply {
             background-image: linear-gradient(var(--btc-reply-line-tint), var(--btc-reply-line-tint));
         }
 
         /* ---------- 2. Citation ---------- */
         ${REPLY_STYLES[r.style] || REPLY_STYLES.rail}
 
-        .btc-reply-slot > * {
+        ${S} > * {
             align-items: flex-start !important;
         }
         /* La bulle vit dans un wrapper en display:block plus haut qu'elle. Alignée en
@@ -258,8 +271,8 @@
            selon que la première ligne contenait une emote ou non. On donne au wrapper
            la hauteur exacte d'une ligne de citation et on y centre la bulle :
            l'ancrage devient indépendant du contenu. */
-        .btc-reply-slot .tw-svg,
-        .btc-reply-slot > * > div:first-child:has(svg) {
+        ${S} .tw-svg,
+        ${S} > * > div:first-child:has(svg) {
             height: calc(var(--btc-reply-font-scale, ${r.fontScale}) * ${r.lineHeight}em) !important;
             display: flex !important;
             align-items: center !important;
@@ -268,14 +281,14 @@
         }
         /* Twitch tronque la citation avec overflow:hidden posé sur des wrappers
            intermédiaires : on les neutralise pour que le texte puisse se dérouler. */
-        .btc-reply-slot,
-        .btc-reply-slot > *,
-        .btc-reply-slot > * > * {
+        ${S},
+        ${S} > *,
+        ${S} > * > * {
             overflow: visible !important;
             max-height: none !important;
             min-width: 0 !important;
         }
-        .btc-reply-quote {
+        ${Q} {
             display: block !important;
             white-space: normal !important;
             overflow: visible !important;
@@ -289,27 +302,27 @@
             color: var(--btc-reply-color) !important;
             overflow-wrap: anywhere !important;
         }
-        .btc-reply-quote .btc-reply-emote {
+        ${Q} .btc-reply-emote {
             height: var(--btc-reply-emote-height) !important;
             width: auto !important;
             vertical-align: -0.32em !important;
             margin: 0 1px !important;
             display: inline-block !important;
         }
-        .btc-reply-quote .btc-reply-mention {
+        ${Q} .btc-reply-mention {
             color: inherit !important;
             font-weight: 600 !important;
         }
-        .btc-reply-quote .btc-reply-target {
+        ${Q} .btc-reply-target {
             font-weight: 600 !important;
         }
-        .btc-reply-slot svg {
+        ${S} svg {
             width: calc(var(--btc-reply-font-scale, ${r.fontScale}) * 1.15em) !important;
             height: calc(var(--btc-reply-font-scale, ${r.fontScale}) * 1.15em) !important;
             opacity: 0.55;
             flex-shrink: 0;
         }
-        ${r.showIcon ? '' : '.btc-reply-slot svg { display: none !important; }'}
+        ${r.showIcon ? '' : `${S} svg { display: none !important; }`}
 
         /* ---------- 3. Notices sub / prime / gift compactées ---------- */
         ${c.enabled ? `
