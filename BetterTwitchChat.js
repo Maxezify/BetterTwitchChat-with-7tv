@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.3.1
+// @version      15.3.2
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -39,7 +39,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.3.1';
+    const VERSION = '15.3.2';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -1033,6 +1033,42 @@
             };
             console.table(info);
             return info;
+        },
+
+        /**
+         * Explique QUI décide de la taille de la citation. Parcourt toutes les feuilles
+         * de style, retient les règles qui visent réellement l'élément et déclarent une
+         * font-size, et les rend dans l'ordre de la cascade. À utiliser quand la taille
+         * ne correspond pas à `fontScale` : la dernière ligne gagnante est la coupable.
+         */
+        whyFontSize() {
+            const quote = document.querySelector('.btc-reply-quote');
+            if (!quote) { console.warn('[BTC] aucune réponse à l\'écran'); return null; }
+            const matches = [];
+            for (const sheet of document.styleSheets) {
+                let rules;
+                try { rules = sheet.cssRules; }
+                catch (e) { matches.push({ origine: sheet.href || '(inline)', erreur: 'illisible (CORS)' }); continue; }
+                if (!rules) continue;
+                for (const rule of rules) {
+                    if (!rule.style || !rule.selectorText) continue;
+                    const value = rule.style.getPropertyValue('font-size');
+                    if (!value) continue;
+                    let hit = false;
+                    try { hit = quote.matches(rule.selectorText); } catch (e) { /* sélecteur exotique */ }
+                    if (!hit) continue;
+                    matches.push({
+                        origine: sheet.href ? sheet.href.split('/').pop() : (sheet.ownerNode?.id || '(inline)'),
+                        selecteur: rule.selectorText,
+                        valeur: value,
+                        important: rule.style.getPropertyPriority('font-size') === 'important'
+                    });
+                }
+            }
+            const applique = getComputedStyle(quote).fontSize;
+            console.log(`[BTC] taille réellement appliquée : ${applique}`);
+            console.table(matches);
+            return { applique, regles: matches };
         }
     };
 

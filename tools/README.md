@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-39 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+45 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -64,6 +64,13 @@ Autres constats utiles :
 - Sur une réponse, 7TV pose `data-seventv-reply-parent-login` et
   `-display-name` sur la ligne : le login exact de la personne citée, sans avoir à
   analyser le texte de la citation.
+- Le réglage « Chat Font Size » de 7TV n'agit que si la classe
+  `seventv-twitch-chat-font-size-enabled` est posée sur `<html>` ; il applique alors
+  `font-size: var(--seventv-twitch-chat-font-size)` sur `[data-a-target="chat-line-message"]`,
+  donc sur la ligne et non sur la citation. Laissé à sa valeur par défaut, il n'ajoute
+  ni la classe ni la variable et n'a aucun effet.
+- Les réglages actifs sont lisibles dans la liste de classes de `<html>`
+  (`seventv-chat-message-style-full-width`, `seventv-chat-mention-highlight-enabled`…).
 - 7TV applique aux emotes un `style` inline `width/max-width/max-height` en `!important`.
   Un style inline important l'emporte sur une feuille d'auteur : ne pas compter sur du
   CSS pour redimensionner *ses* emotes (celles reconstruites dans les citations portent

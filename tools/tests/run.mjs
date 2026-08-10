@@ -304,6 +304,12 @@ check('__BTC.check() rapporte la version', diag.version, (v) => /^\d+\.\d+\.\d+$
 check('__BTC.check() mesure la citation', diag.tailleCitation, '10.92px');
 check('__BTC.check() mesure le message', diag.tailleMessage, '14px');
 
+// Le diagnostic de cascade doit désigner notre règle comme gagnante.
+const why = await page.evaluate(() => window.__BTC.whyFontSize());
+check('whyFontSize() rapporte la taille appliquée', why.applique, '10.92px');
+check('whyFontSize() trouve notre règle', why.regles,
+    (rs) => rs.some(r => /btc-reply-quote/.test(r.selecteur || '') && r.important));
+
 // L'option de recoloration doit rester fonctionnelle même si elle est désactivée par défaut.
 const colorOptIn = await page.evaluate(async () => {
     window.__BTC.config.reply.colorQuotedName = true;

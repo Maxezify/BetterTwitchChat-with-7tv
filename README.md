@@ -54,6 +54,14 @@ présentation de citation sans recharger :
 __BTC.config.reply.style = 'inline'; __BTC.reload();
 ```
 
+### Diagnostic
+
+```js
+__BTC.check()        // version en place, style actif, tailles calculées
+__BTC.whyFontSize()  // toutes les règles CSS qui visent la citation, dans l'ordre
+                     // de la cascade — pour savoir qui impose une taille
+```
+
 ### Présentation de la citation (`reply.style`)
 
 | Valeur | Rendu |
@@ -97,7 +105,7 @@ styled-components changeant à chaque build de Twitch.
 
 - [`tools/7tv-dom-recorder.user.js`](tools/7tv-dom-recorder.user.js) — capture la
   structure réelle du chat pour diagnostiquer une future casse.
-- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 39 vérifications du script contre du
+- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 45 vérifications du script contre du
   DOM Twitch réellement capturé, exécutées dans Chromium.
 
 Voir [`tools/README.md`](tools/README.md).
