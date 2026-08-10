@@ -1,1340 +1,880 @@
 // ==UserScript==
-// @name         Remove Twitch "Replying to" Text (No Delay) - 2 Lines Max + Compact Subs
-// @namespace    http://tampermonkey.net/
-// @version      14.2
-// @description  Supprime "Replying to" instantanément, limite l'affichage des réponses à 2 lignes avec ellipsis, et compacte l'affichage des subs/gifts comme FrankerFaceZ
-// @author       Assistant
+// @name         BetterTwitchChat (+ 7TV)
+// @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
+// @version      15.0.0
+// @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
+// @author       Maxezify
 // @match        https://www.twitch.tv/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=twitch.tv
 // @grant        none
-// @run-at       document-start
+// @run-at       document-idle
 // ==/UserScript==
 
-(function() {
+/*
+ * v15 — réécriture complète.
+ *
+ * La nouvelle extension 7TV (ID lppmekppnliemjclknbagdhoocikieoi) ne remplace plus le
+ * moteur de rendu du chat : elle décore le chat natif de Twitch. Toutes les classes
+ * `.seventv-chat-list`, `.seventv-message`, `.seventv-sub-message-container`… sur
+ * lesquelles reposait la v14 ont disparu. Ce script cible désormais le DOM Twitch natif
+ * et lit les marqueurs 7TV (`data-seventv-*`, `.seventv-emote`, classes de highlight)
+ * là où ils existent.
+ *
+ * Ancres considérées comme stables :
+ *   [data-test-selector="chat-scrollable-area__message-container"]  conteneur du chat
+ *   .chat-line__message / [data-a-target="chat-line-message"]       ligne de message
+ *   .chat-line__message-container                                   corps de la ligne
+ *   [data-a-target="chat-line-message-body"] / .text-fragment       texte du message
+ *   .chat-author__display-name                                      pseudo
+ *   [data-test-selector="user-notice-line"]                         notice sub/gift/raid
+ *   .mystery-gift-theme__*                                          gift multiple
+ *   img[data-emote-name] / .seventv-emote / .chat-image             emotes
+ *
+ * Les classes en `Layout-sc-…`/`kBZhWz` sont des hachages styled-components : elles
+ * changent à chaque build de Twitch et ne sont JAMAIS utilisées comme sélecteur ici.
+ * Le bloc « réponse » n'a pas de classe stable ; il est identifié par sa position
+ * (premier enfant non vide de .chat-line__message-container) et par son <p title>.
+ */
+
+(function () {
     'use strict';
 
-    // ============================================
-    // CONSTANTES ET REGEX PRÉ-COMPILÉES
-    // ============================================
-    const REPLY_REGEX = /^Replying to\s*/i;
-    const REPLY_TEXT_EXACT = ['Replying to', 'Replying to '];
-    const SPACE_BEFORE_DOT = /\s+\./g;
-    const SPACE_BEFORE_COMMA = /\s+,/g;
-    const WATCH_STREAK_FULL = /is currently on a\s+(\d+)-?stream streak\s*!?\s*in\s+\S+'s channel!?/gi;
-    const WATCH_STREAK_SIMPLE = /is currently on a\s+(\d+)-?stream streak\s*!?/gi;
-    const WATCH_STREAK_HEADER = /Watch Streak Reached!?:?\s*/gi;
-    const CHANNEL_SUFFIX = /\s*!?in\s+\S+'s channel!?/gi;
-    const REDEEMED_REGEX = /\bredeemed\b/gi;
-    const RAID_REGEX = /raided with a viewer count of\s*(\d+)\s*\.?/gi;
+    // =========================================================================
+    // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
+    // =========================================================================
+    const CONFIG = {
+        // --- Réponses ---
+        reply: {
+            // Fond du message qui répond à quelqu'un. Volontairement exprimé en blanc
+            // semi-transparent : il s'ajoute au fond existant, donc il reste visible
+            // par-dessus les couleurs de highlight 7TV (modo, VIP, first-time…).
+            lineTint: 'hsla(0, 0%, 100%, 0.05)',
+            // Fond du bloc de citation lui-même, un cran plus clair.
+            blockTint: 'hsla(0, 0%, 100%, 0.06)',
+            // Couleur du texte cité : gris, plus sombre que le texte des messages.
+            color: '#8f8f9a',
+            // Taille de la citation, relative au texte du chat.
+            fontScale: 0.92,
+            // Retire « Répond à » / « Replying to » et garde « @pseudo : texte ».
+            hidePrefix: true,
+            // Garde la petite bulle SVG à gauche de la citation.
+            showIcon: true,
+            // Reconstruit les emotes dans la citation (Twitch n'y met que du texte brut).
+            renderEmotes: true,
+            emoteHeight: '1.5em',
+            // Épaisseur de la barre de couleur reprise du grade 7TV.
+            accentWidth: '2px',
+            accentFallback: 'hsla(0, 0%, 100%, 0.22)'
+        },
 
-    // Sélecteurs UNIQUEMENT pour le conteneur de chat (pas de fallback générique)
-    const CHAT_CONTAINER_SELECTORS = [
-        '.seventv-chat-list',
-        '.chat-scrollable-area__message-container',
-        '.chat-room__content .chat-list',
-        '.stream-chat .chat-list'
+        // --- Notices sub / prime / gift / raid ---
+        compact: {
+            enabled: true,
+            fontSize: '12.5px',
+            lineHeight: '1.35',
+            iconSize: '15px',
+            // Regroupe « X offre N abonnements » + les N « X a offert un abonnement à Y »
+            // en une seule notice avec la liste des destinataires.
+            aggregateGifts: true,
+            // Délai d'attente des gifts individuels après l'annonce du gift multiple.
+            giftWindowMs: 12000,
+            // Fenêtre de rattrapage pour les gifts arrivés avant l'annonce.
+            giftLookbehindMs: 15000
+        },
+
+        // --- Divers ---
+        // Trait de séparation entre les messages.
+        separators: true,
+        // Traduit en français les notices que Twitch laisse en anglais et les notices
+        // système de 7TV (celles-ci sont toujours en anglais). Sans effet si ton
+        // interface Twitch est déjà en français.
+        translate: true,
+        // Journalise dans la console ce que le script détecte.
+        debug: false
+    };
+
+    // =========================================================================
+    // SÉLECTEURS
+    // =========================================================================
+    const SEL = {
+        chatRoot: [
+            '[data-test-selector="chat-scrollable-area__message-container"]',
+            '.chat-scrollable-area__message-container',
+            '.seventv-chat-list'
+        ],
+        line: '.chat-line__message,[data-a-target="chat-line-message"]',
+        lineContainer: '.chat-line__message-container',
+        body: '[data-a-target="chat-line-message-body"]',
+        username: '.chat-author__display-name',
+        chatterName: '.chatter-name',
+        notice: '[data-test-selector="user-notice-line"]',
+        systemNotice: '[data-seventv-system-notice],.seventv-system-notice-line',
+        resubCustom: '[data-a-target="chat-resubscription-message__custom-message"]',
+        massGiftName: '.mystery-gift-theme__displayname',
+        massGiftImage: '.mystery-gift-theme__image',
+        massGiftOverlay: '.mystery-gift-theme__overlay',
+        emote: 'img[data-emote-name],img.seventv-emote,img.chat-image,img.chat-line__message--emote'
+    };
+
+    const log = (...args) => { if (CONFIG.debug) console.log('[BTC]', ...args); };
+
+    // =========================================================================
+    // TEXTES — reconnaissance FR + EN
+    // =========================================================================
+    const RE = {
+        // « Répond à @user : texte » / « Replying to @user: text »
+        replyPrefix: /^\s*(?:Répond\s+à|En\s+réponse\s+à|Replying\s+to)\s*/i,
+        // « offre 50 abonnements de niveau 1 à la communauté » / « is gifting 50 Tier 1 Subs »
+        massGift: /(?:offre|a\s+offert)\s+([\d\s .,]+?)\s*abonnements?\b|is\s+gifting\s+([\d,]+)\s*Tier/i,
+        // « a offert un abonnement de niveau 1 à X » / « Gifted a Tier 1 Sub to X »
+        singleGift: /a\s+offert\s+un\s+abonnement|gifted\s+a\s+.*\bsub\s+to\b/i,
+        tier: /(?:niveau|Tier)\s*(\d)/i,
+        totalGifts: /(?:d[ée]j[àa]\s+offert|total\s+of)\s+([\d\s .,]+?)\s*(?:abonnements?|Subs?)/i,
+        subscribed: /s'est\s+abonn|subscribed\s+(?:with|at|for)/i,
+        raid: /a\s+lanc[ée]\s+un\s+raid|raided\s+with\s+a\s+viewer\s+count/i
+    };
+
+    // 7TV laisse ses notices système en anglais quelle que soit la langue de Twitch.
+    const SYSTEM_NOTICE_FR = [
+        [/^(\S+)\s+was\s+timed\s+out\s+for\s+(\d+)\s+seconds?$/i, (m) => `${m[1]} a été exclu ${m[2]} s`],
+        [/^(\S+)\s+was\s+permanently\s+banned$/i, (m) => `${m[1]} a été banni définitivement`],
+        [/^(\S+)\s+was\s+unbanned$/i, (m) => `${m[1]} a été débanni`],
+        [/^(\d+)\s+messages?\s+deleted$/i, (m) => `${m[1]} message(s) supprimé(s)`],
+        [/^message\s+deleted$/i, () => 'message supprimé']
     ];
 
-    // Sélecteurs pour vérifier si un élément est dans le chat
-    const CHAT_PARENT_SELECTORS = '.seventv-chat-list, .chat-scrollable-area__message-container, .chat-room, .stream-chat';
+    // Repli si l'interface Twitch est en anglais.
+    const NOTICE_FR = [
+        [/\bsubscribed with Prime\b/gi, "s'est abonné avec Prime"],
+        [/\bsubscribed at Tier (\d)\b/gi, "s'est abonné au niveau $1"],
+        [/\bThey've subscribed for (\d+) months?\b/gi, 'abonné depuis $1 mois'],
+        [/\bis gifting (\d+) Tier (\d) Subs to the community\b/gi, 'offre $1 abonnements de niveau $2 à la communauté'],
+        [/\bGifted a Tier (\d) Sub to\b/gi, 'a offert un abonnement de niveau $1 à'],
+        [/\bThey've gifted a total of (\d+) Subs in the channel\b/gi, 'a déjà offert $1 abonnements sur cette chaîne'],
+        [/\bIt's their first Gift Sub in the channel\b/gi, 'premier abonnement offert sur cette chaîne'],
+        [/\braided with a viewer count of (\d+)\b/gi, 'a lancé un raid avec $1 viewers'],
+        [/\bWatch Streak Reached!?:?\s*/gi, ''],
+        [/\bis currently on a (\d+)-?stream streak\b/gi, 'est sur une série de $1 streams'],
+        [/\s*!?\s*in\s+\S+'s channel\b/gi, ''],
+        [/\bredeemed\b/gi, 'a utilisé']
+    ];
 
-    // WeakSets pour tracker les éléments traités
-    const processedElements = new WeakSet();
-    const processedHighlights = new WeakSet();
-    const processedSubMessages = new WeakSet();
-    const processedReplyEmotes = new WeakSet();
-
-    // État global
-    let chatContainer = null;
-    let chatObserver = null;
-    let isObserving = false;
-    let emoteCollectorScheduler = null;
-    let giftCleanupScheduler = null;
-
-    // ============================================
-    // FONCTION CLÉ : VÉRIFIER SI DANS LE CHAT
-    // ============================================
-    const isInChat = (element) => {
-        if (!element || !element.closest) return false;
-        // Vérifie si l'élément est dans le conteneur de chat connu
-        if (chatContainer && chatContainer.contains(element)) return true;
-        // Fallback : vérifie via les sélecteurs
-        return !!element.closest(CHAT_PARENT_SELECTORS);
+    const normalizeSpaces = (s) => s.replace(/[\u00a0\u202f]/g, ' ').replace(/\s+/g, ' ').trim();
+    const parseCount = (raw) => {
+        if (!raw) return 0;
+        const n = parseInt(raw.replace(/[\s .,]/g, ''), 10);
+        return Number.isFinite(n) ? n : 0;
     };
 
-    // ============================================
-    // UTILITAIRES IDLE CALLBACK
-    // ============================================
-    const scheduleIdleTask = (callback, timeout = 5000) => {
-        if ('requestIdleCallback' in window) {
-            return requestIdleCallback(callback, { timeout });
+    // =========================================================================
+    // CSS
+    // =========================================================================
+    const buildCSS = () => {
+        const r = CONFIG.reply;
+        const c = CONFIG.compact;
+        return `
+        :root {
+            --btc-reply-line-tint: ${r.lineTint};
+            --btc-reply-block-tint: ${r.blockTint};
+            --btc-reply-color: ${r.color};
+            --btc-reply-font-scale: ${r.fontScale};
+            --btc-reply-emote-height: ${r.emoteHeight};
+            --btc-reply-accent: ${r.accentFallback};
         }
-        return setTimeout(callback, 100);
-    };
 
-    const cancelIdleTask = (id) => {
-        if ('requestIdleCallback' in window) {
-            cancelIdleCallback(id);
-        } else {
-            clearTimeout(id);
+        /* ---------- 1. Message qui répond à quelqu'un ---------- */
+        /* Teinte additive : elle se compose avec le fond posé par 7TV (highlight de
+           grade, first-time chatter…) au lieu de l'écraser. */
+        .chat-line__message.btc-reply {
+            background-image: linear-gradient(var(--btc-reply-line-tint), var(--btc-reply-line-tint));
         }
-    };
 
-    const createIdleScheduler = (task, intervalMs) => {
-        let timeoutId = null;
-        let lastRun = 0;
-        
-        const run = () => {
-            const now = Date.now();
-            if (now - lastRun >= intervalMs) {
-                task();
-                lastRun = now;
-            }
-            timeoutId = scheduleIdleTask(run, intervalMs);
-        };
-        
-        return {
-            start() { timeoutId = scheduleIdleTask(run, intervalMs); },
-            stop() { if (timeoutId) cancelIdleTask(timeoutId); timeoutId = null; }
-        };
-    };
-
-    // Cache des emotes
-    const EMOTE_CACHE_MAX_SIZE = 150;
-    const emoteCache = new Map();
-
-    // ============================================
-    // TRADUCTIONS
-    // ============================================
-    const translations = {
-        'It\'s their first Gift Sub in the channel!': 'C\'est son premier cadeau d\'abonnement sur cette chaîne !',
-        'raided with a viewer count of': 'a lancé un raid avec',
-        'They\'ve gifted a total of': 'Cette personne a offert',
-        'Watch Streak Reached!': 'Série de visionnage atteinte !',
-        'Subs in the channel!': 'abonnements sur cette chaîne !',
-        'They\'ve subscribed for': 'Abonné depuis',
-        'Highlight My Message': 'Mettre mon message en avant',
-        'is currently on a': 'est actuellement sur une série de',
-        'Subscribed with': ' s\'est abonné avec',
-        'stream streak': 'streams consécutifs',
-        '-stream streak': ' streams',
-        'Tier 1 Subs': 'abonnements de niveau 1',
-        'Tier 2 Subs': 'abonnements de niveau 2',
-        'Tier 3 Subs': 'abonnements de niveau 3',
-        'with Prime .': 'avec Prime.',
-        'Tier 1 Sub': 'de niveau 1',
-        'Tier 2 Sub': 'de niveau 2',
-        'Tier 3 Sub': 'de niveau 3',
-        'Subscribed': ' s\'est abonné',
-        'with Prime': 'avec Prime',
-        'is gifting': 'offre',
-        'Gifted a': 'a offert un abonnement',
-        'with Tier': 'avec le niveau',
-        'Tier 1 .': 'niveau 1.',
-        'Tier 2 .': 'niveau 2.',
-        'Tier 3 .': 'niveau 3.',
-        'Tier 1': 'de niveau 1',
-        'Tier 2': 'de niveau 2',
-        'Tier 3': 'de niveau 3',
-        'months .': 'mois.',
-        'months!': 'mois !',
-        'in a row': 'consécutifs',
-        'month .': 'mois.',
-        'redeemed': 'a utilisé',
-        'month!': 'mois !',
-        'months': 'mois',
-        'Sub to': 'à',
-        'month': 'mois',
-        'to the community': 'à la communauté',
-    };
-
-    const translationKeys = Object.keys(translations).sort((a, b) => b.length - a.length);
-
-    // ============================================
-    // GESTION DES MASS GIFT SUBS
-    // ============================================
-    const giftTracker = {
-        pending: new Map(),
-        earlyGifts: new Map(),
-        COLLECT_DELAY: 3000,
-        MAX_AGE: 30000,
-        
-        cleanup(donorKey) {
-            const data = this.pending.get(donorKey);
-            if (data?.timeout) clearTimeout(data.timeout);
-            this.pending.delete(donorKey);
-        },
-        
-        addEarlyGift(donor, element, recipient) {
-            if (!this.earlyGifts.has(donor)) {
-                this.earlyGifts.set(donor, []);
-            }
-            this.earlyGifts.get(donor).push({ element, recipient, timestamp: Date.now() });
-        },
-        
-        processEarlyGifts(donor, data) {
-            const early = this.earlyGifts.get(donor);
-            if (!early) return;
-            
-            for (const gift of early) {
-                if (data.recipients.length < data.count) {
-                    data.recipients.push(gift.recipient);
-                    gift.element.classList.add('compact-gift-hidden');
-                }
-            }
-            this.earlyGifts.delete(donor);
-        },
-        
-        cleanupOld() {
-            const now = Date.now();
-            for (const [key, data] of this.pending.entries()) {
-                if (now - data.timestamp > this.MAX_AGE) {
-                    this.cleanup(key);
-                }
-            }
-            for (const [donor, gifts] of this.earlyGifts.entries()) {
-                const filtered = gifts.filter(g => now - g.timestamp < this.MAX_AGE);
-                if (filtered.length === 0) {
-                    this.earlyGifts.delete(donor);
-                } else {
-                    this.earlyGifts.set(donor, filtered);
-                }
-            }
+        /* ---------- 2. Bloc de citation ---------- */
+        .btc-reply-slot {
+            background-image: linear-gradient(var(--btc-reply-block-tint), var(--btc-reply-block-tint));
+            border-left: ${r.accentWidth} solid var(--btc-reply-accent);
+            border-radius: 2px;
+            padding: 2px 6px 2px 6px !important;
+            margin: 1px 0 3px 0 !important;
         }
-    };
+        .btc-reply-slot > * {
+            align-items: flex-start !important;
+        }
+        /* Twitch tronque la citation avec overflow:hidden posé sur des wrappers
+           intermédiaires : on les neutralise pour que le texte puisse se dérouler. */
+        .btc-reply-slot,
+        .btc-reply-slot > *,
+        .btc-reply-slot > * > * {
+            overflow: visible !important;
+            max-height: none !important;
+            min-width: 0 !important;
+        }
+        .btc-reply-quote {
+            display: block !important;
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+            -webkit-line-clamp: none !important;
+            -webkit-box-orient: initial !important;
+            max-height: none !important;
+            height: auto !important;
+            font-size: calc(1em * var(--btc-reply-font-scale)) !important;
+            line-height: 1.35 !important;
+            color: var(--btc-reply-color) !important;
+            overflow-wrap: anywhere !important;
+        }
+        .btc-reply-quote .btc-reply-emote {
+            height: var(--btc-reply-emote-height) !important;
+            width: auto !important;
+            vertical-align: -0.32em !important;
+            margin: 0 1px !important;
+            display: inline-block !important;
+        }
+        .btc-reply-quote .btc-reply-mention {
+            color: inherit !important;
+            font-weight: 600 !important;
+        }
+        .btc-reply-slot svg {
+            width: 1.15em !important;
+            height: 1.15em !important;
+            opacity: 0.55;
+            flex-shrink: 0;
+        }
+        ${r.showIcon ? '' : '.btc-reply-slot svg { display: none !important; }'}
 
-    // ============================================
-    // INJECTION CSS
-    // ============================================
-    const injectCSS = () => {
-        if (document.getElementById('reply-fix-styles')) return;
+        /* ---------- 3. Notices sub / prime / gift compactées ---------- */
+        ${c.enabled ? `
+        .btc-notice-card {
+            padding: 3px 8px !important;
+            margin: 1px 0 !important;
+        }
+        .btc-notice-bar {
+            width: 3px !important;
+            min-width: 3px !important;
+        }
+        .btc-notice-line {
+            font-size: ${c.fontSize} !important;
+            line-height: ${c.lineHeight} !important;
+            padding: 0 !important;
+        }
+        .btc-notice-line p,
+        .btc-notice-line span:not(.btc-gift-recipient) {
+            line-height: ${c.lineHeight} !important;
+        }
+        .btc-notice-line > * svg {
+            width: ${c.iconSize} !important;
+            height: ${c.iconSize} !important;
+        }
+        /* Le message personnalisé d'un resub reste à taille normale. */
+        .btc-notice-line ${SEL.resubCustom} {
+            font-size: 14px !important;
+            line-height: 1.5 !important;
+            margin-top: 2px !important;
+        }
+        .btc-notice-line ${SEL.resubCustom} svg {
+            width: auto !important;
+            height: auto !important;
+        }
+        /* Illustration « cadeau mystère » : de 100 px de haut à une vignette. */
+        .btc-notice-line ${SEL.massGiftImage} {
+            width: 26px !important;
+            height: 26px !important;
+            object-fit: contain !important;
+            margin: 0 6px 0 0 !important;
+        }
+        .btc-notice-line ${SEL.massGiftOverlay} {
+            display: none !important;
+        }
+        .btc-notice-line ${SEL.massGiftName} {
+            display: inline !important;
+            font-size: ${c.fontSize} !important;
+            margin: 0 !important;
+        }
+        /* Le nom du donateur est un <p> passé en inline : sans ça, il se recolle au
+           texte qui suit (« SquidNinja00offre 50 abonnements »). */
+        .btc-notice-line ${SEL.massGiftName}::after {
+            content: " ";
+            white-space: pre;
+        }
+        ` : ''}
 
-        const style = document.createElement('style');
-        style.id = 'reply-fix-styles';
-        style.textContent = `
-            /* BORDURES SUR CHAQUE MESSAGE */
-            .seventv-chat-message-background {
-                border-bottom: 1px solid hsla(0, 0%, 100%, 0.1) !important;
-                padding-bottom: 0.4rem !important;
-                margin-bottom: 0.1rem !important;
-            }
+        /* ---------- Regroupement des gifts multiples ---------- */
+        .btc-hidden { display: none !important; }
+        .btc-gift-recipients {
+            margin: 3px 0 0 32px;
+            color: hsla(0, 0%, 100%, 0.72);
+            font-size: 0.95em;
+            line-height: 1.35;
+            overflow-wrap: anywhere;
+        }
+        .btc-gift-recipient:not(:last-child)::after {
+            content: ", ";
+            color: hsla(0, 0%, 100%, 0.45);
+        }
+        .btc-gift-pending {
+            opacity: 0.6;
+            font-style: italic;
+        }
 
-            .chat-line__message:not(.chat-line--inline),
-            .chat-line_moderation, .chat-line_status, .chat-line_raid, .user-notice-line {
-                border-bottom: 1px solid hsla(0, 0%, 100%, 0.1) !important;
-                padding-bottom: 0.4rem !important;
-            }
+        /* ---------- Séparateurs ---------- */
+        ${CONFIG.separators ? `
+        .chat-line__message:not(.chat-line--inline),
+        .btc-notice-card,
+        .chat-line__status,
+        .seventv-system-notice-line {
+            border-bottom: 1px solid hsla(0, 0%, 100%, 0.08) !important;
+            padding-bottom: 4px !important;
+        }
+        ` : ''}
 
-            /* SCROLLBAR 7TV - CACHÉ */
-            .seventv-chat-list .scrollbar,
-            .seventv-chat-list .scrollbar-thumb,
-            .seventv-chat-list div[class*="scrollbar"] {
-                display: none !important;
-                visibility: hidden !important;
-                opacity: 0 !important;
-                width: 0 !important;
-                pointer-events: none !important;
-            }
-
-            /* ALIGNEMENT BADGES ET EMOTES AVEC LE TEXTE */
-            .chat-badge, .seventv-chat-badge img, .chat-badge img, [class*="badge"] img,
-            .seventv-emote, .seventv-chat-emote, .seventv-emote-box img,
-            img[data-seventv-emote-id], .chat-image__container img,
-            img.chat-line__message--emote, .emote,
-            .seventv-painted-content img, .seventv-message img:not(.compact-mass-gift-icon img) {
-                vertical-align: -0.2em !important;
-            }
-
-            /* EMOTES 7TV DANS LES MESSAGES */
-            .seventv-emote-box.emote-token {
-                vertical-align: text-bottom !important;
-            }
-
-            /* ICÔNE CŒUR MASS GIFT */
-            .compact-mass-gift-icon,
-            .compact-mass-gift-icon svg {
-                vertical-align: middle !important;
-            }
-
-            /* CACHE "REPLYING TO" */
-            span.seventv-reply-prefix,
-            span[class*="reply-prefix"],
-            .seventv-reply-part span.reply-to-text {
-                display: none !important;
-            }
-
-            /* EMOTES & MENTIONS DANS LES RÉPONSES */
-            .reply-emote {
-                height: 1.5em !important;
-                width: auto !important;
-                vertical-align: middle !important;
-                margin: 0 2px !important;
-                display: inline !important;
-            }
-            .reply-mention {
-                text-decoration: underline !important;
-            }
-
-            /* FOND GRIS POUR RÉPONSES (classe ajoutée par JS) */
-            .seventv-message.is-reply-message:not(:has(.seventv-user-message.has-highlight)) {
-                background: hsla(0, 0%, 60%, .24) !important;
-            }
-
-            /* RÉPONSES - WHITE-SPACE */
-            .seventv-message.is-reply-message,
-            .chat-line__message--reply {
-                white-space: normal !important;
-            }
-
-            /* Masquer les gifts cachés */
-            .seventv-message.compact-gift-hidden {
-                display: none !important;
-            }
-
-            /* USERNAMES */
-            .chat-line__username,
-            .chat-author__display-name {
-                display: inline-block !important;
-                -webkit-line-clamp: unset !important;
-                overflow: visible !important;
-                white-space: nowrap !important;
-            }
-
-            /* COMPACT SUB/RESUB MESSAGES */
-            .seventv-sub-message-container {
-                padding: 0.3rem 0.8rem !important;
-                margin: 0.15rem 0 !important;
-            }
-            .seventv-sub-message-container .sub-part {
-                display: flex !important;
-                align-items: center !important;
-                flex-wrap: wrap !important;
-            }
-            .seventv-sub-message-container .sub-name,
-            .seventv-sub-message-container .sub-name-big {
-                display: inline !important;
-                font-size: inherit !important;
-                font-weight: 700 !important;
-            }
-            .seventv-sub-message-container .sub-message-icon,
-            .seventv-sub-message-container .gift-icon {
-                display: flex !important;
-                align-items: center !important;
-                justify-content: center !important;
-                padding-right: 0.4rem !important;
-                flex-shrink: 0 !important;
-            }
-            .seventv-sub-message-container .sub-message-icon svg,
-            .seventv-sub-message-container .gift-icon svg {
-                width: 18px !important;
-                height: 18px !important;
-            }
-            .seventv-sub-message-container .sub-message-text {
-                margin-left: 0 !important;
-                flex: 1 !important;
-            }
-            .seventv-sub-message-container .message-part {
-                width: 100% !important;
-                margin-top: 0.2rem !important;
-                padding-top: 0 !important;
-            }
-
-            /* COMPACT MASS GIFT */
-            .compact-mass-gift-container {
-                display: block;
-                padding: 0.3rem 0.8rem;
-                margin: 0.1rem 0;
-                background-color: hsla(0deg, 0%, 50%, 10%);
-                border: 0.3rem solid var(--seventv-channel-accent, #9147ff);
-                overflow-wrap: anywhere;
-                line-height: 1.4;
-            }
-            .seventv-sub-message-container:has(.compact-mass-gift-container),
-            .seventv-sub-message-container.compact-mass-gift,
-            .seventv-sub-message-container.compact-mass-gift.seventv-highlight {
-                border: none !important;
-                padding: 0 !important;
-                margin: 0 !important;
-                background: transparent !important;
-            }
-            .compact-mass-gift-header {
-                display: flex;
-                align-items: center;
-                gap: 0.4rem;
-            }
-            .compact-mass-gift-icon {
-                flex-shrink: 0;
-                display: flex;
-                align-items: center;
-                color: #bf94ff;
-            }
-            .compact-mass-gift-icon svg {
-                width: 18px;
-                height: 18px;
-            }
-            .compact-mass-gift-text {
-                flex: 1;
-            }
-            .compact-mass-gift-donor,
-            .compact-mass-gift-recipient {
-                color: #bf94ff;
-                font-weight: 700;
-            }
-            .compact-mass-gift-recipients {
-                margin-top: 0.8rem;
-                margin-left: 22px;
-                color: hsla(0, 0%, 100%, 0.9);
-                font-size: 0.9em;
-                line-height: 1.3;
-            }
-            .compact-mass-gift-recipient:not(:last-child)::after {
-                content: ", ";
-                font-weight: 400;
-            }
-
-            /* BORDERS COMBINÉS */
-            .seventv-chat-message-background.highlight-border,
-            .seventv-message.highlight-border,
-            .highlight-border,
-            .seventv-sub-message-container.seventv-highlight,
-            .watch-streak-border,
-            .raid-border {
-                border: 0.3rem solid var(--seventv-channel-accent, #9147ff) !important;
-            }
-            .seventv-sub-message-container.seventv-highlight {
-                padding: 0.3rem 0.8rem !important;
-            }
-
-            /* SUPPRESSION BORDERS INTERNES */
-            .watch-streak-border .seventv-sub-message-container,
-            .watch-streak-border.seventv-sub-message-container,
-            .watch-streak-border .seventv-highlight,
-            .watch-streak-border.seventv-highlight,
-            .watch-streak-border > *,
-            .watch-streak-border .sub-part,
-            .raid-border .seventv-sub-message-container,
-            .raid-border.seventv-sub-message-container,
-            .raid-border > * {
-                border: none !important;
-            }
-
-            /* PROPAGER LE FOND HIGHLIGHT */
-            .seventv-message:has(.seventv-user-message.has-highlight) .seventv-sub-message-container.seventv-highlight,
-            .seventv-message:has(.seventv-user-message.has-highlight) .compact-mass-gift-container {
-                background-color: var(--seventv-highlight-dim-color) !important;
-            }
-
-            .seventv-message:has(.seventv-sub-message-container.seventv-highlight) .seventv-user-message.has-highlight,
-            .seventv-message:has(.compact-mass-gift-container) .seventv-user-message.has-highlight {
-                border: none !important;
-            }
+        /* ---------- Alignement emotes / badges ---------- */
+        .chat-line__message .chat-badge {
+            vertical-align: -0.15em !important;
+        }
         `;
-
-        (document.head || document.documentElement).appendChild(style);
     };
 
-    injectCSS();
+    const injectCSS = () => {
+        const id = 'btc-styles';
+        let style = document.getElementById(id);
+        if (!style) {
+            style = document.createElement('style');
+            style.id = id;
+            (document.head || document.documentElement).appendChild(style);
+        }
+        style.textContent = buildCSS();
+    };
 
-    // ============================================
-    // FONCTIONS UTILITAIRES
-    // ============================================
-    
-    const getTextNodes = (element) => {
-        const nodes = [];
-        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
+    // =========================================================================
+    // INDEX DES EMOTES
+    // Twitch ne met que du texte brut dans la citation d'une réponse. Pour y
+    // réafficher les emotes, on indexe celles qui passent dans le chat.
+    // =========================================================================
+    const EMOTE_INDEX_MAX = 600;
+    const emoteIndex = new Map(); // nom -> url
+
+    const urlFromSrcset = (srcset) => {
+        if (!srcset) return null;
+        // « url 1x, url 2x, url 3x » — on prend le 2x s'il existe, sinon le premier.
+        const entries = srcset.split(',').map(s => s.trim()).filter(Boolean);
+        if (!entries.length) return null;
+        const two = entries.find(e => /\s2x$/.test(e));
+        return (two || entries[0]).split(/\s+/)[0] || null;
+    };
+
+    const rememberEmote = (img) => {
+        const name = img.dataset.emoteName || img.getAttribute('alt');
+        if (!name || emoteIndex.has(name)) return;
+        const url = img.dataset.fallbackImageUrl
+            || urlFromSrcset(img.getAttribute('srcset'))
+            || img.currentSrc
+            || img.getAttribute('src');
+        if (!url) return;
+        if (emoteIndex.size >= EMOTE_INDEX_MAX) {
+            // FIFO : on jette le plus ancien quart.
+            let drop = Math.floor(EMOTE_INDEX_MAX / 4);
+            for (const key of emoteIndex.keys()) {
+                if (drop-- <= 0) break;
+                emoteIndex.delete(key);
+            }
+        }
+        emoteIndex.set(name, url);
+    };
+
+    const indexEmotes = (root) => {
+        if (!CONFIG.reply.renderEmotes) return;
+        let images;
+        try { images = root.querySelectorAll(SEL.emote); } catch (e) { return; }
+        for (const img of images) rememberEmote(img);
+    };
+
+    // =========================================================================
+    // RÉPONSES
+    // =========================================================================
+
+    /**
+     * Le bloc « réponse » n'a aucune classe stable. Twitch place systématiquement un
+     * premier <div> vide dans .chat-line__message-container ; quand le message est une
+     * réponse, ce div contient l'icône + un <p title="texte d'origine">.
+     */
+    const findReplyParts = (line) => {
+        const container = line.querySelector(SEL.lineContainer);
+        if (!container) return null;
+        const slot = container.firstElementChild;
+        if (!slot || slot.childElementCount === 0) return null;
+        const quote = slot.querySelector('p');
+        if (!quote) return null;
+        return { slot, quote };
+    };
+
+    /** Récupère l'élément qui porte le texte du message d'origine dans la citation. */
+    const findQuoteTextNode = (quote) => {
+        // Structure observée : « Répond à <span>@user</span> : <span>texte</span> »
+        const spans = quote.querySelectorAll(':scope > span');
+        return spans.length ? spans[spans.length - 1] : null;
+    };
+
+    /** Remplace les noms d'emotes par des images et met les mentions en valeur. */
+    const tokenizeQuote = (target) => {
+        const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+        const textNodes = [];
         let node;
-        while (node = walker.nextNode()) nodes.push(node);
-        return nodes;
-    };
+        while ((node = walker.nextNode())) textNodes.push(node);
 
-    const cleanSpaces = (text) => text.replace(SPACE_BEFORE_DOT, '.').replace(SPACE_BEFORE_COMMA, ',');
-
-    const translateText = (text) => {
-        if (!text) return text;
-        let result = text;
-        for (const key of translationKeys) {
-            if (result.includes(key)) {
-                result = result.replaceAll(key, translations[key]);
-            }
-        }
-        return cleanSpaces(result);
-    };
-
-    // ============================================
-    // GESTION DES EMOTES DANS LES RÉPONSES
-    // ============================================
-
-    const addToEmoteCache = (name, data) => {
-        if (!name || !data.src || emoteCache.has(name)) return;
-        
-        if (emoteCache.size >= EMOTE_CACHE_MAX_SIZE) {
-            let count = 0;
-            for (const key of emoteCache.keys()) {
-                if (count++ >= 30) break;
-                emoteCache.delete(key);
-            }
-        }
-        
-        emoteCache.set(name, data);
-    };
-
-    const collectEmotesFromChat = () => {
-        if (emoteCache.size >= EMOTE_CACHE_MAX_SIZE - 20) return;
-        if (!chatContainer) return;
-        
-        // Limiter la recherche au conteneur de chat
-        const seventvSelectors = '.seventv-emote, img[data-seventv-emote-id], .seventv-chat-emote';
-        
-        for (const emote of chatContainer.querySelectorAll(seventvSelectors)) {
-            const name = emote.alt || emote.getAttribute('data-seventv-emote-name') || emote.title;
-            const src = emote.src || emote.getAttribute('srcset')?.split(' ')[0];
-            if (name && src) addToEmoteCache(name, { src, type: '7tv' });
-        }
-
-        const twitchSelectors = '.chat-image__container img, img.chat-line__message--emote';
-        
-        for (const emote of chatContainer.querySelectorAll(twitchSelectors)) {
-            const name = emote.alt;
-            const src = emote.src;
-            if (name && src) addToEmoteCache(name, { src, type: 'twitch' });
-        }
-    };
-
-    const renderEmotesInReply = (replyElement) => {
-        if (!replyElement || processedReplyEmotes.has(replyElement)) return;
-        
-        processedReplyEmotes.add(replyElement);
-
-        const replyText = replyElement.querySelector('.seventv-reply-message-part, .reply-message-text, .seventv-reply-text, [class*="reply-message"]');
-        const targetElement = replyText || replyElement;
-        if (!targetElement) return;
-
-        const textNodes = getTextNodes(targetElement);
-        
         for (const textNode of textNodes) {
             const text = textNode.textContent;
-            if (!text || text.trim().length === 0) continue;
+            if (!text || !text.trim()) continue;
 
             const parts = text.split(/(\s+)/);
-            let hasEmoteOrMention = false;
-            
+            let needsWork = false;
             for (const part of parts) {
-                const trimmed = part.trim();
-                if (trimmed && (emoteCache.has(trimmed) || trimmed.startsWith('@'))) {
-                    hasEmoteOrMention = true;
-                    break;
-                }
+                const t = part.trim();
+                if (!t) continue;
+                if (emoteIndex.has(t) || (t.length > 1 && t[0] === '@')) { needsWork = true; break; }
             }
-            
-            if (!hasEmoteOrMention) continue;
+            if (!needsWork) continue;
 
-            const fragment = document.createDocumentFragment();
-            
+            const frag = document.createDocumentFragment();
             for (const part of parts) {
-                const trimmed = part.trim();
-                
-                if (!trimmed) {
-                    fragment.appendChild(document.createTextNode(part));
-                    continue;
-                }
-                
-                if (emoteCache.has(trimmed)) {
-                    const emoteData = emoteCache.get(trimmed);
+                const t = part.trim();
+                if (!t) { frag.appendChild(document.createTextNode(part)); continue; }
+
+                if (emoteIndex.has(t)) {
                     const img = document.createElement('img');
-                    img.src = emoteData.src;
-                    img.alt = trimmed;
-                    img.title = trimmed;
-                    img.className = 'reply-emote';
-                    img.style.cssText = 'height: 1.5em; width: auto; vertical-align: middle; margin: 0 2px; display: inline;';
-                    fragment.appendChild(img);
-                } else if (trimmed.startsWith('@')) {
+                    img.src = emoteIndex.get(t);
+                    img.alt = t;
+                    img.title = t;
+                    img.loading = 'lazy';
+                    img.className = 'btc-reply-emote';
+                    frag.appendChild(img);
+                } else if (t.length > 1 && t[0] === '@') {
                     const span = document.createElement('span');
-                    span.className = 'reply-mention';
-                    span.textContent = trimmed;
-                    fragment.appendChild(span);
+                    span.className = 'btc-reply-mention';
+                    span.textContent = t;
+                    frag.appendChild(span);
                 } else {
-                    fragment.appendChild(document.createTextNode(part));
+                    frag.appendChild(document.createTextNode(part));
                 }
             }
-            
-            if (textNode.parentNode) {
-                textNode.parentNode.replaceChild(fragment, textNode);
-            }
+            if (textNode.parentNode) textNode.parentNode.replaceChild(frag, textNode);
         }
     };
 
-    const processReplyEmotes = (container) => {
-        const replies = container.querySelectorAll('.is-reply-message, .seventv-reply-part, .reply-part');
-        for (const reply of replies) {
-            renderEmotesInReply(reply);
+    /** Retire « Répond à » / « Replying to » en gardant « @pseudo : texte ». */
+    const stripReplyPrefix = (quote) => {
+        for (const child of quote.childNodes) {
+            if (child.nodeType !== Node.TEXT_NODE) continue;
+            const stripped = child.textContent.replace(RE.replyPrefix, '');
+            if (stripped !== child.textContent) {
+                child.textContent = stripped;
+                return true;
+            }
+            if (child.textContent.trim()) return false; // premier texte utile, pas un préfixe
         }
+        return false;
     };
 
-    // ============================================
-    // FONCTIONS PRINCIPALES
-    // ============================================
+    /**
+     * Reporte la couleur posée par 7TV (highlight de grade modo/VIP, first-time chatter,
+     * highlight personnalisé) sur la barre latérale du bloc de citation. On lit le style
+     * calculé plutôt que des classes précises : ça marche quelle que soit la façon dont
+     * 7TV applique la couleur, et ça survivra à ses prochaines mises à jour.
+     */
+    const isTransparent = (color) =>
+        !color || color === 'transparent' || /rgba\(\s*0,\s*0,\s*0,\s*0\s*\)/.test(color);
 
-    const propagateHighlight = (userMessage, retryCount = 0) => {
-        if (!userMessage || processedHighlights.has(userMessage)) return;
-        if (!userMessage.classList.contains('has-highlight')) return;
-
-        const background = userMessage.closest('.seventv-chat-message-background');
-        if (!background || background.classList.contains('has-highlight-propagated')) return;
-
-        const style = userMessage.style;
-        const highlightColor = style.getPropertyValue('--seventv-highlight-color');
-        const highlightDimColor = style.getPropertyValue('--seventv-highlight-dim-color');
-
-        if ((!highlightColor || !highlightDimColor) && retryCount < 5) {
-            setTimeout(() => propagateHighlight(userMessage, retryCount + 1), 50);
-            return;
-        }
-
-        if (highlightColor) background.style.setProperty('--seventv-highlight-color', highlightColor);
-        if (highlightDimColor) background.style.setProperty('--seventv-highlight-dim-color', highlightDimColor);
-
-        const labelEl = userMessage.querySelector('.seventv-chat-message-highlight-label');
-        const label = labelEl?.getAttribute('data-highlight-label');
-        if (label) background.setAttribute('data-highlight-label', label);
-
-        background.classList.add('has-highlight-propagated');
-        processedHighlights.add(userMessage);
-    };
-
-    const processTextElement = (element) => {
-        if (!element || processedElements.has(element)) return;
-
-        const text = element.textContent;
-        if (!text?.startsWith('Replying')) return;
-
-        if (REPLY_TEXT_EXACT.includes(text)) {
-            element.style.display = 'none';
-            processedElements.add(element);
-            return;
-        }
-
-        if (REPLY_REGEX.test(text)) {
-            const newText = text.replace(REPLY_REGEX, '');
-            if (newText.trim() === '') {
-                element.style.display = 'none';
-            } else if (element.childNodes.length === 1 && element.firstChild?.nodeType === Node.TEXT_NODE) {
-                element.firstChild.textContent = newText;
-            } else {
-                element.textContent = newText;
-            }
-            processedElements.add(element);
-        }
-    };
-
-    // ============================================
-    // TRAITEMENT DES MESSAGES
-    // ============================================
-
-    const translateSubMessage = (container) => {
-        const textEl = container.querySelector('.sub-message-text');
-        if (!textEl) return;
-
-        for (const node of getTextNodes(textEl)) {
-            const translated = translateText(node.textContent);
-            if (translated !== node.textContent) {
-                node.textContent = translated;
-            }
-        }
-        
-        cleanupSpacesBeforePunctuation(textEl);
-    };
-
-    const cleanupSpacesBeforePunctuation = (element) => {
-        if (!element) return;
-        
-        SPACE_BEFORE_DOT.lastIndex = 0;
-        SPACE_BEFORE_COMMA.lastIndex = 0;
-        
-        const textNodes = getTextNodes(element);
-        const len = textNodes.length;
-        
-        for (let i = 0; i < len; i++) {
-            const node = textNodes[i];
-            const text = node.textContent;
-            
-            if (i > 0 && /^[.,:]/.test(text.trim())) {
-                const prev = textNodes[i - 1];
-                if (prev) prev.textContent = prev.textContent.replace(/\s+$/, '');
-            }
-            
-            SPACE_BEFORE_DOT.lastIndex = 0;
-            SPACE_BEFORE_COMMA.lastIndex = 0;
-            if (SPACE_BEFORE_DOT.test(text) || SPACE_BEFORE_COMMA.test(text)) {
-                SPACE_BEFORE_DOT.lastIndex = 0;
-                SPACE_BEFORE_COMMA.lastIndex = 0;
-                node.textContent = cleanSpaces(text);
-            }
-        }
-        
-        const spans = element.querySelectorAll('span');
-        const spansLen = spans.length;
-        if (spansLen > 50) return;
-        
-        for (let i = 0; i < spansLen; i++) {
-            const span = spans[i];
-            const spanText = span.textContent;
-            if (spanText === '.' || spanText === ',' || spanText === ' .' || spanText === ' ,') {
-                let prev = span.previousSibling;
-                while (prev) {
-                    if (prev.nodeType === Node.TEXT_NODE) {
-                        prev.textContent = prev.textContent.replace(/\s+$/, '');
-                        break;
-                    } else if (prev.nodeType === Node.ELEMENT_NODE) {
-                        const nodes = getTextNodes(prev);
-                        if (nodes.length) {
-                            nodes[nodes.length - 1].textContent = nodes[nodes.length - 1].textContent.replace(/\s+$/, '');
-                        }
-                        break;
-                    }
-                    prev = prev.previousSibling;
+    const applyGradeAccent = (line) => {
+        let accent = null;
+        try {
+            const cs = getComputedStyle(line);
+            if (parseFloat(cs.borderLeftWidth) > 0 && !isTransparent(cs.borderLeftColor)) {
+                accent = cs.borderLeftColor;
+            } else if (!isTransparent(cs.backgroundColor)) {
+                // Fond de grade semi-transparent : on en reprend la teinte, opacifiée,
+                // pour que la barre reste lisible.
+                const m = cs.backgroundColor.match(/rgba?\(([^)]+)\)/);
+                if (m) {
+                    const [red, green, blue] = m[1].split(',').map(v => parseFloat(v));
+                    accent = `rgba(${red}, ${green}, ${blue}, 0.85)`;
                 }
             }
-        }
+        } catch (e) { /* style indisponible */ }
+
+        if (accent) line.style.setProperty('--btc-reply-accent', accent);
+        else line.style.removeProperty('--btc-reply-accent');
     };
 
-    // ============================================
-    // WATCH STREAK
-    // ============================================
+    const processReply = (line) => {
+        const parts = findReplyParts(line);
+        if (!parts) return;
+        const { slot, quote } = parts;
 
-    const reformatWatchStreak = (msgElement) => {
-        const fullText = msgElement.textContent || '';
-        const match = fullText.match(/(\w+)\s+is currently on a\s+(\d+)-?stream streak/i);
-        if (!match) return false;
+        line.classList.add('btc-reply');
+        slot.classList.add('btc-reply-slot');
+        quote.classList.add('btc-reply-quote');
+        applyGradeAccent(line);
 
-        WATCH_STREAK_HEADER.lastIndex = 0;
-        WATCH_STREAK_FULL.lastIndex = 0;
-        WATCH_STREAK_SIMPLE.lastIndex = 0;
-        CHANNEL_SUFFIX.lastIndex = 0;
-        REDEEMED_REGEX.lastIndex = 0;
+        // Idempotence. On se repère sur l'attribut title, qui porte le texte d'origine
+        // et que Twitch met à jour quand React recycle la ligne pour un autre message.
+        // Surtout pas sur textContent : on le modifie nous-mêmes, donc il dériverait et
+        // le bloc serait retraité en boucle.
+        const key = quote.getAttribute('title');
+        if (key !== null) {
+            if (quote.dataset.btcQuote === key) return;
+            quote.dataset.btcQuote = key;
+        } else {
+            if (quote.dataset.btcQuote === '1') return;
+            quote.dataset.btcQuote = '1';
+        }
 
-        for (const node of getTextNodes(msgElement)) {
+        if (CONFIG.reply.hidePrefix) stripReplyPrefix(quote);
+
+        if (CONFIG.reply.renderEmotes) {
+            const target = findQuoteTextNode(quote) || quote;
+            tokenizeQuote(target);
+        }
+        log('réponse traitée', key.slice(0, 60));
+    };
+
+    // =========================================================================
+    // NOTICES (sub, prime, gift, raid…)
+    // =========================================================================
+
+    const translateNotice = (element) => {
+        if (!CONFIG.translate) return;
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        let node;
+        while ((node = walker.nextNode())) {
             let text = node.textContent;
-            
-            if (text.includes('Watch Streak Reached')) {
-                WATCH_STREAK_HEADER.lastIndex = 0;
-                text = text.replace(WATCH_STREAK_HEADER, '');
+            if (!text || text.length < 3) continue;
+            let out = text;
+            for (const [re, to] of NOTICE_FR) {
+                re.lastIndex = 0;
+                if (re.test(out)) { re.lastIndex = 0; out = out.replace(re, to); }
             }
-            
-            if (text.includes('is currently on a') && text.includes('stream streak')) {
-                WATCH_STREAK_FULL.lastIndex = 0;
-                WATCH_STREAK_SIMPLE.lastIndex = 0;
-                text = text.replace(WATCH_STREAK_FULL, 'est sur une série de $1 streams !');
-                text = text.replace(WATCH_STREAK_SIMPLE, 'est sur une série de $1 streams !');
-            }
-            
-            if (text.includes("'s channel")) {
-                CHANNEL_SUFFIX.lastIndex = 0;
-                text = text.replace(CHANNEL_SUFFIX, '');
-            }
-            
-            if (text.includes('redeemed')) {
-                REDEEMED_REGEX.lastIndex = 0;
-                text = text.replace(REDEEMED_REGEX, 'a utilisé');
-            }
-            
-            if (text !== node.textContent) {
-                node.textContent = text;
-            }
+            if (out !== text) node.textContent = out.replace(/\s+([.,!?])/g, '$1');
         }
-        
-        return true;
     };
 
-    // ============================================
-    // RAID
-    // ============================================
-
-    const reformatRaid = (msgElement) => {
-        RAID_REGEX.lastIndex = 0;
-        
-        for (const node of getTextNodes(msgElement)) {
-            let text = node.textContent;
-            
-            if (text.includes('raided with a viewer count of')) {
-                RAID_REGEX.lastIndex = 0;
-                text = text.replace(RAID_REGEX, 'a lancé un raid avec $1 viewers !');
-            }
-            
-            if (text !== node.textContent) {
-                node.textContent = text;
-            }
+    const translateSystemNotice = (element) => {
+        if (!CONFIG.translate) return;
+        const span = element.querySelector('.seventv-system-notice') || element;
+        const text = normalizeSpaces(span.textContent || '');
+        if (!text) return;
+        for (const [re, build] of SYSTEM_NOTICE_FR) {
+            const m = text.match(re);
+            if (m) { span.textContent = build(m); return; }
         }
-        
-        return true;
     };
 
-    // ============================================
-    // MASS GIFT
-    // ============================================
+    const compactNotice = (noticeLine) => {
+        if (!CONFIG.compact.enabled) return;
+        noticeLine.classList.add('btc-notice-line');
 
-    const extractFromSubContainer = (element, type) => {
-        const textEl = element.querySelector('.sub-message-text');
-        if (!textEl) return type === 'donor' ? element.querySelector('.sub-name-big, .sub-name.bold, .sub-name')?.textContent.trim() : null;
-        
-        const text = textEl.textContent;
-        
-        switch(type) {
-            case 'donor':
-                return element.querySelector('.sub-name-big, .sub-name.bold, .sub-name')?.textContent.trim();
-            case 'recipient':
-                const match = text.match(/(?:Sub to|abonnement[^à]*à)\s+([^\s.!,]+)/i);
-                return match?.[1];
-            case 'tier':
-                return text.match(/(?:Tier|niveau)\s+(\d)/i)?.[1] || '1';
-            case 'giftCount':
-                return parseInt(text.match(/(?:gifting|offre)\s+(\d+)/i)?.[1], 10) || 0;
-            case 'totalGifts':
-                return parseInt(text.match(/(?:total of|a offert)\s+(\d+)/i)?.[1], 10) || 0;
-            case 'isFirst':
-                return text.includes("first Gift Sub") || text.includes("premier cadeau");
-            case 'isMassGift':
-                return (text.includes('is gifting') || text.includes('offre')) && (text.includes('Subs') || text.includes('abonnement'));
-            case 'isIndividualGift':
-                const isGift = text.includes('Gifted a') || text.toLowerCase().includes('a offert un abonnement');
-                const hasRecipient = text.includes('Sub to') || text.includes(' à ');
-                return isGift && hasRecipient;
+        // La « carte » est le parent qui porte le fond et la barre de couleur. On ne
+        // la décore que si c'est bien un conteneur dédié : jamais la racine du chat,
+        // sinon le padding s'appliquerait à toute la liste.
+        const card = noticeLine.parentElement;
+        if (!card || card === chatRoot || card.classList.contains('btc-notice-card')) return;
+        if (card.childElementCount > 3) return;
+
+        card.classList.add('btc-notice-card');
+        // La barre de couleur est le frère précédent : un div vide avec un
+        // background inline.
+        const bar = noticeLine.previousElementSibling;
+        if (bar && !bar.childElementCount && bar.getAttribute('style')) {
+            bar.classList.add('btc-notice-bar');
         }
-        return null;
     };
 
-    const GIFT_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 6.5A2.5 2.5 0 017.5 4c.97 0 1.654.56 2.155 1.094.254.271.464.55.635.801.17-.25.38-.53.635-.801C11.425 4.56 12.103 4 13.072 4A2.5 2.5 0 0116 6.5c0 .727-.31 1.38-.804 1.84L10.285 15l-4.91-6.66A2.492 2.492 0 015 6.5z" clip-rule="evenodd"></path></svg>';
+    // =========================================================================
+    // REGROUPEMENT DES GIFTS MULTIPLES
+    // =========================================================================
+    const gifts = {
+        pending: new Map(),   // donateur -> { notice, expected, recipients, listEl, timer, ts }
+        recent: [],           // gifts individuels vus récemment : { donor, recipient, line, ts }
 
-    const createCompactMassGiftElement = (donor, tier, recipients, totalGifts, isFirst) => {
-        const container = document.createElement('div');
-        container.className = 'compact-mass-gift-container';
-        
-        const totalText = isFirst 
-            ? "C'est son premier cadeau d'abonnement sur cette chaîne !"
-            : `Cette personne a offert ${totalGifts} abonnements sur cette chaîne !`;
-        
-        const recipientsList = recipients.map(r => `<span class="compact-mass-gift-recipient">${r}</span>`).join('');
-        
-        container.innerHTML = `<div class="compact-mass-gift-header"><div class="compact-mass-gift-icon">${GIFT_ICON_SVG}</div><div class="compact-mass-gift-text"><span class="compact-mass-gift-donor">${donor}</span> offre ${recipients.length} abonnement${recipients.length > 1 ? 's' : ''} de niveau ${tier} à la communauté ! ${totalText}</div></div><div class="compact-mass-gift-recipients">${recipientsList}</div>`;
-        
-        return container;
+        MAX_PENDING: 8,
+
+        prune(now) {
+            const cutoff = now - CONFIG.compact.giftLookbehindMs;
+            let i = 0;
+            while (i < this.recent.length && this.recent[i].ts < cutoff) i++;
+            if (i) this.recent.splice(0, i);
+        },
+
+        open(donor, notice, expected, tier) {
+            this.close(donor);
+            if (this.pending.size >= this.MAX_PENDING) {
+                const oldest = [...this.pending.keys()][0];
+                this.close(oldest);
+            }
+            const listEl = document.createElement('div');
+            listEl.className = 'btc-gift-recipients btc-gift-pending';
+            notice.appendChild(listEl);
+
+            const entry = {
+                notice, expected, tier, listEl,
+                recipients: [], ts: Date.now(), timer: null
+            };
+            entry.timer = setTimeout(() => this.close(donor), CONFIG.compact.giftWindowMs);
+            this.pending.set(donor, entry);
+
+            // Rattrapage : certains gifts individuels arrivent avant l'annonce.
+            this.prune(Date.now());
+            for (const g of this.recent) {
+                if (g.donor === donor) this.absorb(donor, g.recipient, g.line);
+            }
+            this.render(donor);
+            log('gift multiple ouvert', donor, expected);
+        },
+
+        absorb(donor, recipient, line) {
+            const entry = this.pending.get(donor);
+            if (!entry) return false;
+            if (entry.recipients.length >= entry.expected) return false;
+            if (entry.recipients.includes(recipient)) return false;
+            entry.recipients.push(recipient);
+            line.classList.add('btc-hidden');
+            return true;
+        },
+
+        render(donor) {
+            const entry = this.pending.get(donor);
+            if (!entry) return;
+            const { listEl, recipients, expected } = entry;
+            listEl.textContent = '';
+            for (const name of recipients) {
+                const span = document.createElement('span');
+                span.className = 'btc-gift-recipient';
+                span.textContent = name;
+                listEl.appendChild(span);
+            }
+            const complete = recipients.length >= expected;
+            listEl.classList.toggle('btc-gift-pending', !complete);
+            if (!recipients.length) listEl.textContent = '';
+        },
+
+        close(donor) {
+            const entry = this.pending.get(donor);
+            if (!entry) return;
+            clearTimeout(entry.timer);
+            entry.listEl.classList.remove('btc-gift-pending');
+            if (!entry.recipients.length) entry.listEl.remove();
+            this.pending.delete(donor);
+        },
+
+        reset() {
+            for (const entry of this.pending.values()) clearTimeout(entry.timer);
+            this.pending.clear();
+            this.recent.length = 0;
+        }
     };
 
-    const processSubMessage = (msgElement) => {
-        if (!msgElement || processedSubMessages.has(msgElement)) return;
-        
-        const subContainer = msgElement.querySelector('.seventv-sub-message-container');
-        const fullText = msgElement.textContent || '';
-        
-        if (fullText.includes('Watch Streak') || fullText.includes('stream streak') || fullText.includes('est sur une série de')) {
-            reformatWatchStreak(msgElement);
-            addBorderClass(msgElement, 'watch-streak-border');
-            processedSubMessages.add(msgElement);
+    const nameAt = (notice, index) => {
+        const names = notice.querySelectorAll(SEL.chatterName);
+        const el = names[index];
+        return el ? normalizeSpaces(el.textContent) : null;
+    };
+
+    const processGiftNotice = (notice, text) => {
+        if (!CONFIG.compact.aggregateGifts) return;
+
+        const massMatch = text.match(RE.massGift);
+        if (massMatch) {
+            const expected = parseCount(massMatch[1] || massMatch[2]);
+            const donorEl = notice.querySelector(`${SEL.massGiftName} ${SEL.chatterName}`)
+                || notice.querySelector(SEL.chatterName);
+            const donor = donorEl ? normalizeSpaces(donorEl.textContent) : null;
+            const tier = (text.match(RE.tier) || [])[1] || '1';
+            if (donor && expected > 0) gifts.open(donor, notice, expected, tier);
             return;
         }
-        
-        if (fullText.includes('raided with a viewer count of') || fullText.includes('a lancé un raid avec')) {
-            reformatRaid(msgElement);
-            addBorderClass(msgElement, 'raid-border');
-            processedSubMessages.add(msgElement);
-            return;
-        }
-        
-        if (!subContainer) return;
 
-        translateSubMessage(subContainer);
-        cleanupSpacesBeforePunctuation(subContainer);
-        
-        if (extractFromSubContainer(subContainer, 'isMassGift')) {
-            const donor = extractFromSubContainer(subContainer, 'donor');
-            const tier = extractFromSubContainer(subContainer, 'tier');
-            const giftCount = extractFromSubContainer(subContainer, 'giftCount');
-            const totalGifts = extractFromSubContainer(subContainer, 'totalGifts');
-            const isFirst = extractFromSubContainer(subContainer, 'isFirst');
-            
-            if (donor && giftCount > 0) {
-                const donorKey = `${donor}-${Date.now()}`;
-                
-                const data = {
-                    count: giftCount, tier, recipients: [],
-                    totalGifts: totalGifts || giftCount, isFirst,
-                    element: msgElement, timeout: null,
-                    timestamp: Date.now()
-                };
-                
-                giftTracker.pending.set(donorKey, data);
-                msgElement.dataset.giftDonorKey = donorKey;
-                
-                giftTracker.processEarlyGifts(donor, data);
-                
-                data.timeout = setTimeout(() => {
-                    finalizeMassGift(donorKey);
-                }, giftTracker.COLLECT_DELAY);
-            }
-            processedSubMessages.add(msgElement);
-            return;
-        }
-        
-        if (extractFromSubContainer(subContainer, 'isIndividualGift')) {
-            const donor = extractFromSubContainer(subContainer, 'donor');
-            const recipient = extractFromSubContainer(subContainer, 'recipient');
-            
-            if (donor && recipient) {
-                let found = false;
-                
-                for (const [key, data] of giftTracker.pending.entries()) {
-                    if (key.startsWith(donor + '-') && data.recipients.length < data.count) {
-                        data.recipients.push(recipient);
-                        msgElement.classList.add('compact-gift-hidden');
-                        found = true;
-                        
-                        if (data.recipients.length >= data.count) {
-                            clearTimeout(data.timeout);
-                            finalizeMassGift(key);
-                        }
-                        break;
-                    }
-                }
-                
-                if (!found) {
-                    giftTracker.addEarlyGift(donor, msgElement, recipient);
-                    msgElement.classList.add('compact-gift-hidden');
-                }
-            }
-            processedSubMessages.add(msgElement);
-            return;
-        }
-        
-        processedSubMessages.add(msgElement);
-        propagateHighlightBackground(msgElement);
-        setTimeout(() => cleanupSpacesBeforePunctuation(subContainer), 50);
-    };
+        if (RE.singleGift.test(text)) {
+            const donor = nameAt(notice, 0);
+            const recipient = nameAt(notice, 1);
+            if (!donor || !recipient) return;
 
-    const propagateHighlightBackground = (msgElement) => {
-        const highlightEl = msgElement.querySelector('.seventv-user-message.has-highlight');
-        if (!highlightEl) return;
-        
-        const subContainer = msgElement.querySelector('.seventv-sub-message-container.seventv-highlight');
-        const massGiftContainer = msgElement.querySelector('.compact-mass-gift-container');
-        
-        const computedStyle = window.getComputedStyle(highlightEl);
-        const bgColor = computedStyle.backgroundColor;
-        
-        if (bgColor && bgColor !== 'transparent' && bgColor !== 'rgba(0, 0, 0, 0)') {
-            if (subContainer) {
-                subContainer.style.backgroundColor = bgColor;
+            const line = notice.closest('.btc-notice-card')?.parentElement
+                || notice.parentElement
+                || notice;
+
+            const now = Date.now();
+            gifts.prune(now);
+            gifts.recent.push({ donor, recipient, line, ts: now });
+
+            if (gifts.absorb(donor, recipient, line)) {
+                gifts.render(donor);
+                const entry = gifts.pending.get(donor);
+                if (entry && entry.recipients.length >= entry.expected) gifts.close(donor);
             }
-            if (massGiftContainer) {
-                massGiftContainer.style.backgroundColor = bgColor;
-            }
-            highlightEl.style.border = 'none';
         }
     };
 
-    const finalizeMassGift = (donorKey) => {
-        const data = giftTracker.pending.get(donorKey);
-        if (!data?.element) {
-            giftTracker.cleanup(donorKey);
-            return;
-        }
-        
-        const { element, tier, recipients, totalGifts, isFirst } = data;
-        const donor = donorKey.split('-')[0];
-        
-        const subContainer = element.querySelector('.seventv-sub-message-container');
-        if (subContainer && recipients.length > 0) {
-            subContainer.innerHTML = '';
-            subContainer.appendChild(createCompactMassGiftElement(donor, tier, recipients, totalGifts, isFirst));
-            subContainer.classList.add('compact-mass-gift');
-            subContainer.classList.remove('seventv-highlight');
-            Object.assign(subContainer.style, { border: 'none', padding: '0', background: 'transparent' });
-            
-            setTimeout(() => propagateHighlightBackground(element), 10);
-        }
-        
-        giftTracker.cleanup(donorKey);
+    const processNotice = (notice) => {
+        if (notice.dataset.btcNotice === '1') return;
+        notice.dataset.btcNotice = '1';
+
+        translateNotice(notice);
+        compactNotice(notice);
+
+        const text = normalizeSpaces(notice.textContent || '');
+        processGiftNotice(notice, text);
     };
 
-    // ============================================
-    // AJOUT DE BORDURES
-    // ============================================
+    // =========================================================================
+    // TRAITEMENT D'UNE LIGNE
+    // =========================================================================
+    const processLine = (element) => {
+        if (!element || element.nodeType !== Node.ELEMENT_NODE) return;
 
-    const addBorderClass = (msgElement, className) => {
-        msgElement.classList.add(className);
-        const bg = msgElement.querySelector('.seventv-chat-message-background');
-        if (bg) bg.classList.add(className);
-        const sub = msgElement.querySelector('.seventv-sub-message-container');
-        if (sub) sub.classList.add(className);
+        indexEmotes(element);
+
+        // Notices système 7TV (exclusions, suppressions) — toujours en anglais.
+        if (element.matches?.(SEL.systemNotice)) {
+            translateSystemNotice(element);
+        } else {
+            for (const n of element.querySelectorAll(SEL.systemNotice)) translateSystemNotice(n);
+        }
+
+        // Notices Twitch (sub, prime, gift, raid…). Les notices système 7TV portent le
+        // même data-test-selector mais sont déjà compactes : on les laisse tranquilles.
+        const isTwitchNotice = (n) => !n.matches(SEL.systemNotice);
+        if (element.matches?.(SEL.notice) && isTwitchNotice(element)) processNotice(element);
+        for (const n of element.querySelectorAll(SEL.notice)) {
+            if (isTwitchNotice(n)) processNotice(n);
+        }
+
+        // Messages utilisateur
+        if (element.matches?.(SEL.line)) processReply(element);
+        for (const line of element.querySelectorAll(SEL.line)) processReply(line);
     };
 
-    // ============================================
-    // PROCESSEUR PRINCIPAL
-    // ============================================
-
-    const processElement = (element) => {
-        if (!element || element.nodeType !== Node.ELEMENT_NODE || processedElements.has(element)) return;
-
-        const classList = element.classList;
-        if (!classList) return;
-
-        if (classList.contains('seventv-user-message') && classList.contains('has-highlight')) {
-            propagateHighlight(element);
-        }
-
-        const tagName = element.tagName;
-        if (tagName === 'SPAN' || tagName === 'DIV') {
-            processTextElement(element);
-        }
-
-        if (classList.contains('seventv-message')) {
-            processSeventvMessage(element);
-        }
-
-        const highlights = element.getElementsByClassName('seventv-user-message');
-        for (let i = 0; i < highlights.length; i++) {
-            if (highlights[i].classList.contains('has-highlight')) {
-                propagateHighlight(highlights[i]);
-            }
-        }
-
-        const messages = element.getElementsByClassName('seventv-message');
-        for (let i = 0; i < messages.length; i++) {
-            processSeventvMessage(messages[i]);
-        }
-
-        processReplyEmotes(element);
-
-        processedElements.add(element);
-    };
-
-    const processSeventvMessage = (msg) => {
-        if (processedSubMessages.has(msg)) return;
-        
-        const text = msg.textContent || '';
-        
-        // Détecter les réponses (commence par @username: ou @username )
-        if (/^@[^\s:]+[:\s]/.test(text)) {
-            msg.classList.add('is-reply-message');
-        }
-        
-        if (text.includes('Watch Streak') || text.includes('stream streak') || text.includes('est sur une série de')) {
-            reformatWatchStreak(msg);
-            addBorderClass(msg, 'watch-streak-border');
-            propagateHighlightBackground(msg);
-            processedSubMessages.add(msg);
-            return;
-        }
-        
-        if (text.includes('raided with') || text.includes('a lancé un raid')) {
-            reformatRaid(msg);
-            addBorderClass(msg, 'raid-border');
-            propagateHighlightBackground(msg);
-            processedSubMessages.add(msg);
-            return;
-        }
-        
-        if (text.includes('redeemed') || text.includes('a utilisé') || text.includes('Mettre mon message en avant')) {
-            REDEEMED_REGEX.lastIndex = 0;
-            for (const node of getTextNodes(msg)) {
-                if (node.textContent.includes('redeemed')) {
-                    node.textContent = node.textContent.replace(REDEEMED_REGEX, 'a utilisé');
-                }
-            }
-            addBorderClass(msg, 'highlight-border');
-            propagateHighlightBackground(msg);
-        }
-        
-        processSubMessage(msg);
-    };
-
-    // ============================================
-    // INTERCEPTION DOM - LIMITÉE AU CHAT
-    // ============================================
-    
-    const translateTextOnTheFly = (value) => {
-        if (typeof value !== 'string') return value;
-        
-        WATCH_STREAK_HEADER.lastIndex = 0;
-        WATCH_STREAK_FULL.lastIndex = 0;
-        WATCH_STREAK_SIMPLE.lastIndex = 0;
-        REDEEMED_REGEX.lastIndex = 0;
-        RAID_REGEX.lastIndex = 0;
-        
-        if (value.includes('Watch Streak Reached')) {
-            value = value.replace(WATCH_STREAK_HEADER, '');
-        }
-        if (value.includes('is currently on a') && value.includes('stream streak')) {
-            value = value.replace(WATCH_STREAK_FULL, 'est sur une série de $1 streams !');
-            value = value.replace(WATCH_STREAK_SIMPLE, 'est sur une série de $1 streams !');
-        }
-        if (value.includes('redeemed')) {
-            value = value.replace(REDEEMED_REGEX, 'a utilisé');
-        }
-        if (value.includes('raided with a viewer count of')) {
-            value = value.replace(RAID_REGEX, 'a lancé un raid avec $1 viewers !');
-        }
-        
-        return cleanSpaces(value);
-    };
-
-    const setupInterceptors = () => {
-        const originalAppendChild = Node.prototype.appendChild;
-        const originalInsertBefore = Node.prototype.insertBefore;
-        const textContentDesc = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent');
-        const innerTextDesc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'innerText');
-
-        // appendChild - UNIQUEMENT pour les éléments dans le chat
-        Node.prototype.appendChild = function(child) {
-            const result = originalAppendChild.call(this, child);
-            // Vérifier si l'élément ajouté est dans le chat
-            if (child?.nodeType === Node.ELEMENT_NODE && isInChat(child)) {
-                processElement(child);
-            }
-            return result;
-        };
-
-        // insertBefore - UNIQUEMENT pour les éléments dans le chat
-        Node.prototype.insertBefore = function(newNode, refNode) {
-            const result = originalInsertBefore.call(this, newNode, refNode);
-            if (newNode?.nodeType === Node.ELEMENT_NODE && isInChat(newNode)) {
-                processElement(newNode);
-            }
-            return result;
-        };
-
-        // textContent - UNIQUEMENT si dans le chat ET contient des mots-clés
-        Object.defineProperty(Node.prototype, 'textContent', {
-            set(value) {
-                if (typeof value === 'string' && value.length > 0 && value.length < 1000) {
-                    // Vérifier d'abord si contient des mots-clés avant de vérifier isInChat (plus rapide)
-                    if (value.startsWith('Replying to')) {
-                        if (isInChat(this)) {
-                            value = value.replace(REPLY_REGEX, '');
-                        }
-                    } else if (value.includes('subscribed') || value.includes('Gifted') || 
-                               value.includes('redeemed') || value.includes('raided') ||
-                               value.includes('Watch Streak') || value.includes('stream streak')) {
-                        if (isInChat(this)) {
-                            value = translateTextOnTheFly(value);
-                        }
-                    }
-                }
-                textContentDesc.set.call(this, value);
-            },
-            get: textContentDesc.get
-        });
-
-        // innerText - UNIQUEMENT si dans le chat ET contient des mots-clés
-        if (innerTextDesc) {
-            Object.defineProperty(HTMLElement.prototype, 'innerText', {
-                set(value) {
-                    if (typeof value === 'string' && value.length > 0 && value.length < 1000) {
-                        if (value.startsWith('Replying to')) {
-                            if (isInChat(this)) {
-                                value = value.replace(REPLY_REGEX, '');
-                            }
-                        } else if (value.includes('subscribed') || value.includes('Gifted') || 
-                                   value.includes('redeemed') || value.includes('raided') ||
-                                   value.includes('Watch Streak') || value.includes('stream streak')) {
-                            if (isInChat(this)) {
-                                value = translateTextOnTheFly(value);
-                            }
-                        }
-                    }
-                    innerTextDesc.set.call(this, value);
-                },
-                get: innerTextDesc.get
-            });
-        }
-    };
-
-    // ============================================
-    // MUTATION OBSERVER - LIMITÉ AU CONTENEUR CHAT
-    // ============================================
-    
-    let pendingNodes = [];
-    let pendingHighlights = [];
+    // =========================================================================
+    // OBSERVATEUR
+    // =========================================================================
+    let chatRoot = null;
+    let observer = null;
+    let queue = [];
     let frameScheduled = false;
-    const MAX_PENDING_NODES = 50;
+    const QUEUE_MAX = 120;
 
-    const processMutations = () => {
-        const nodes = pendingNodes;
-        const highlights = pendingHighlights;
-        pendingNodes = [];
-        pendingHighlights = [];
+    const flush = () => {
+        const batch = queue;
+        queue = [];
         frameScheduled = false;
-
-        for (const node of nodes) {
-            if (node.isConnected) processElement(node);
-        }
-        
-        for (const target of highlights) {
-            if (target.isConnected) propagateHighlight(target);
+        for (const node of batch) {
+            if (node.isConnected) {
+                try { processLine(node); }
+                catch (e) { console.error('[BTC] échec du traitement', e); }
+            }
         }
     };
 
-    const queueMutation = (mutation) => {
-        if (mutation.type === 'childList') {
-            for (const node of mutation.addedNodes) {
-                if (node.nodeType === Node.ELEMENT_NODE) {
-                    if (pendingNodes.length >= MAX_PENDING_NODES) {
-                        pendingNodes.shift();
-                    }
-                    pendingNodes.push(node);
+    const enqueue = (node) => {
+        if (queue.length >= QUEUE_MAX) queue.shift();
+        queue.push(node);
+        if (!frameScheduled) {
+            frameScheduled = true;
+            requestAnimationFrame(flush);
+        }
+    };
+
+    const onMutations = (mutations) => {
+        for (const m of mutations) {
+            if (m.type === 'childList') {
+                for (const node of m.addedNodes) {
+                    if (node.nodeType === Node.ELEMENT_NODE) enqueue(node);
+                }
+            } else if (m.type === 'attributes') {
+                // 7TV pose ses classes de highlight après l'insertion : il faut
+                // recalculer la couleur d'accent de la citation.
+                const t = m.target;
+                if (t.nodeType === Node.ELEMENT_NODE && t.classList?.contains('btc-reply')) {
+                    applyGradeAccent(t);
                 }
             }
-        } else if (mutation.type === 'attributes') {
-            const target = mutation.target;
-            if (target.classList?.contains('seventv-user-message') && target.classList?.contains('has-highlight')) {
-                pendingHighlights.push(target);
-            }
-        }
-        
-        if (!frameScheduled && (pendingNodes.length > 0 || pendingHighlights.length > 0)) {
-            frameScheduled = true;
-            requestAnimationFrame(processMutations);
         }
     };
 
-    const createObserver = () => new MutationObserver((mutations) => {
-        for (const m of mutations) queueMutation(m);
-    });
-
-    // ============================================
-    // INITIALISATION
-    // ============================================
-    
-    const findChatContainer = () => {
-        for (const selector of CHAT_CONTAINER_SELECTORS) {
-            const container = document.querySelector(selector);
-            if (container) return container;
-        }
-        return null;
-    };
-
-    const observeContainer = (container) => {
-        if (isObserving || !container) return;
-
-        // Stocker la référence du conteneur pour isInChat()
-        chatContainer = container;
-
-        chatObserver = createObserver();
-        chatObserver.observe(container, {
+    const start = (root) => {
+        if (observer) observer.disconnect();
+        chatRoot = root;
+        observer = new MutationObserver(onMutations);
+        observer.observe(root, {
             childList: true,
             subtree: true,
             attributes: true,
-            attributeFilter: ['class'] // Seulement class, pas style
+            attributeFilter: ['class', 'data-seventv-processed']
         });
-
-        isObserving = true;
-        
-        collectEmotesFromChat();
-        
-        if (emoteCollectorScheduler) emoteCollectorScheduler.stop();
-        emoteCollectorScheduler = createIdleScheduler(collectEmotesFromChat, 20000);
-        emoteCollectorScheduler.start();
-        
-        if (giftCleanupScheduler) giftCleanupScheduler.stop();
-        giftCleanupScheduler = createIdleScheduler(() => giftTracker.cleanupOld(), 45000);
-        giftCleanupScheduler.start();
-        
-        processElement(container);
+        processLine(root);
+        log('démarré sur', root.className);
     };
 
-    const waitForChatContainer = () => {
-        const container = findChatContainer();
-        if (container) {
-            observeContainer(container);
-            return;
+    const findChatRoot = () => {
+        for (const sel of SEL.chatRoot) {
+            const el = document.querySelector(sel);
+            if (el) return el;
         }
-
-        // Observer temporaire pour attendre le conteneur de chat
-        const bodyObserver = new MutationObserver(() => {
-            const c = findChatContainer();
-            if (c) {
-                bodyObserver.disconnect();
-                observeContainer(c);
-            }
-        });
-
-        const startBodyObserver = () => {
-            bodyObserver.observe(document.body, { childList: true, subtree: true });
-            
-            // Timeout - arrêter d'observer si pas trouvé après 15 secondes
-            // NE PAS observer document.body en fallback
-            setTimeout(() => {
-                if (!isObserving) {
-                    bodyObserver.disconnect();
-                    // Réessayer de trouver le conteneur toutes les 2 secondes
-                    const retryInterval = setInterval(() => {
-                        const c = findChatContainer();
-                        if (c) {
-                            clearInterval(retryInterval);
-                            observeContainer(c);
-                        }
-                    }, 2000);
-                    // Arrêter les tentatives après 60 secondes
-                    setTimeout(() => clearInterval(retryInterval), 60000);
-                }
-            }, 15000);
-        };
-
-        if (document.body) startBodyObserver();
-        else document.addEventListener('DOMContentLoaded', startBodyObserver, { once: true });
+        return null;
     };
 
-    // Navigation SPA
-    const handleNavigation = () => {
+    let retryTimer = null;
+    const connect = () => {
+        clearInterval(retryTimer);
+        const found = findChatRoot();
+        if (found) { start(found); return; }
+        let attempts = 0;
+        retryTimer = setInterval(() => {
+            const root = findChatRoot();
+            if (root) { clearInterval(retryTimer); start(root); }
+            else if (++attempts > 60) clearInterval(retryTimer);
+        }, 1000);
+    };
+
+    // =========================================================================
+    // NAVIGATION SPA
+    // =========================================================================
+    const teardown = () => {
+        if (observer) { observer.disconnect(); observer = null; }
+        clearInterval(retryTimer);
+        queue = [];
+        frameScheduled = false;
+        chatRoot = null;
+        emoteIndex.clear();
+        gifts.reset();
+    };
+
+    const watchNavigation = () => {
         let lastUrl = location.href;
-
-        const checkUrlChange = () => {
-            if (location.href !== lastUrl) {
-                lastUrl = location.href;
-                
-                if (chatObserver) {
-                    chatObserver.disconnect();
-                    isObserving = false;
-                }
-                
-                chatContainer = null;
-                
-                if (emoteCollectorScheduler) {
-                    emoteCollectorScheduler.stop();
-                    emoteCollectorScheduler = null;
-                }
-                if (giftCleanupScheduler) {
-                    giftCleanupScheduler.stop();
-                    giftCleanupScheduler = null;
-                }
-                
-                emoteCache.clear();
-                
-                for (const [key, data] of giftTracker.pending.entries()) {
-                    if (data.timeout) clearTimeout(data.timeout);
-                }
-                giftTracker.pending.clear();
-                giftTracker.earlyGifts.clear();
-                
-                setTimeout(waitForChatContainer, 500);
-            }
+        const onChange = () => {
+            if (location.href === lastUrl) return;
+            lastUrl = location.href;
+            teardown();
+            setTimeout(connect, 600);
         };
-
-        window.addEventListener('popstate', checkUrlChange);
-        
-        const origPush = history.pushState;
-        const origReplace = history.replaceState;
-        history.pushState = function(...args) { origPush.apply(this, args); checkUrlChange(); };
-        history.replaceState = function(...args) { origReplace.apply(this, args); checkUrlChange(); };
+        window.addEventListener('popstate', onChange);
+        const push = history.pushState;
+        const replace = history.replaceState;
+        history.pushState = function (...args) { push.apply(this, args); onChange(); };
+        history.replaceState = function (...args) { replace.apply(this, args); onChange(); };
     };
 
-    // Démarrage
-    setupInterceptors();
-    handleNavigation();
+    // =========================================================================
+    // DÉMARRAGE
+    // =========================================================================
+    injectCSS();
+    watchNavigation();
+    connect();
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', waitForChatContainer, { once: true });
-    } else {
-        waitForChatContainer();
-    }
+    // Point d'entrée pour bidouiller la config depuis la console.
+    window.__BTC = {
+        config: CONFIG,
+        reload() { injectCSS(); if (chatRoot) processLine(chatRoot); },
+        emotes: emoteIndex,
+        gifts
+    };
 
-    console.log('[Reply Fix + Compact Subs] Script actif - v14.2 - New reply detection');
+    console.log('[BetterTwitchChat] v15.0.0 — chat Twitch natif + 7TV');
 })();

@@ -1,16 +1,60 @@
-# Outils de diagnostic
+# Outils
 
-## `7tv-dom-recorder.user.js`
+## `tests/run.mjs` — suite de tests
+
+28 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
+pseudos remplacés par des placeholders).
+
+```bash
+node tools/tests/run.mjs
+```
+
+Les assertions portent sur le style calculé, pas sur la simple présence de classes :
+troncature réellement annulée, police et couleur effectives de la citation, emote
+servie par le CDN 7TV, taille de l'illustration « cadeau mystère », couleur de grade
+reprise sur la citation, absence de débordement horizontal, idempotence après
+plusieurs passes, comportement après navigation SPA.
+
+Prérequis : Playwright avec Chromium (`npm i -D playwright && npx playwright install
+chromium`, ou une installation globale — le script résout les deux).
+
+## `7tv-dom-recorder.user.js` — enregistreur DOM
+
+Sert à capturer la structure DOM **réelle** du chat pour reconstruire le script sur des
+sélecteurs vérifiés plutôt que devinés. C'est ce qui a servi à écrire la v15 ; à
+ressortir si une future mise à jour de Twitch ou de 7TV casse à nouveau quelque chose.
+
+### Ce que la capture d'août 2026 a établi
 
 7TV a publié une **nouvelle extension** (ID Chrome `lppmekppnliemjclknbagdhoocikieoi`),
 distincte de l'ancienne (`ammjkodgmmoknidbanneddgankgfejfh` / dépôt `SevenTV/Extension`).
-`BetterTwitchChat.js` était écrit à 100 % contre le DOM de l'**ancienne** extension
-(`.seventv-chat-list`, `.seventv-message`, `.seventv-chat-message-background`,
-`.seventv-sub-message-container`, `.seventv-user-message.has-highlight`…). Si ces classes
-n'existent plus, absolument rien du script ne s'accroche — d'où la casse totale.
+Elle ne remplace plus le moteur de rendu du chat : elle décore le chat natif de Twitch.
 
-Ce recorder sert à capturer la structure DOM **réelle** de ton chat pour reconstruire le
-script sur des sélecteurs justes plutôt que devinés.
+| | Ancienne extension | Nouvelle extension |
+|---|---|---|
+| Conteneur | `.seventv-chat-list` | `[data-test-selector="chat-scrollable-area__message-container"]` (Twitch natif) |
+| Message | `.seventv-message` | `.chat-line__message` (Twitch natif) |
+| Notices sub/gift | `.seventv-sub-message-container` | `[data-test-selector="user-notice-line"]` (Twitch natif) |
+| Highlight | `.seventv-user-message.has-highlight` | `.seventv-chat-message-custom-highlight` / `-first-highlight` sur la ligne Twitch |
+| Emotes | `.seventv-emote` avec `src` | `img[data-emote-name]` avec `srcset` + `data-fallback-image-url`, **sans `src`** |
+| Marqueurs | classes `seventv-*` | attributs `data-seventv-*` sur `.chat-line__message` |
+| Techno | Vue | Svelte (classes `.svelte-xxxxx`) |
+
+Autres constats utiles :
+
+- Le bloc « réponse » n'a **aucune classe stable**. Twitch place toujours un `<div>` vide
+  en premier enfant de `.chat-line__message-container` ; quand le message est une
+  réponse, ce div contient l'icône et un `<p title="texte d'origine">`. C'est la seule
+  ancre fiable.
+- Les classes `Layout-sc-1xcs6mc-0`, `kBZhWz`, `glFavL`… sont des hachages
+  styled-components : elles changent à chaque build de Twitch, ne jamais s'en servir.
+- `chat-line__reply-icon` est le **bouton de réponse au survol**, présent sur tous les
+  messages. Ce n'est pas un indicateur de réponse.
+- Les notices Twitch sont rendues dans la langue de l'interface (ici le français). Les
+  notices système de 7TV restent en anglais.
+- 7TV ne colore pas les modos/VIP par défaut : c'est une règle « Custom Highlights » par
+  badge, à configurer dans l'extension.
 
 ### Utilisation
 
