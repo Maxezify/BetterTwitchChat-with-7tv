@@ -54,7 +54,7 @@
             // Fond du message qui répond à quelqu'un. Volontairement exprimé en blanc
             // semi-transparent : il s'ajoute au fond existant, donc il reste visible
             // par-dessus les couleurs de highlight 7TV (modo, VIP, first-time…).
-            lineTint: 'hsla(0, 0%, 100%, 0.05)',
+            lineTint: 'hsla(0, 0%, 100%, 0.08)',
             // Fond du bloc de citation lui-même, un cran plus clair.
             blockTint: 'hsla(0, 0%, 100%, 0.06)',
             // Couleur du texte cité : gris, plus sombre que le texte des messages.
@@ -72,8 +72,8 @@
             colorQuotedName: true,
             emoteHeight: '1.5em',
             // Épaisseur de la barre de couleur reprise du grade 7TV.
-            accentWidth: '2px',
-            accentFallback: 'hsla(0, 0%, 100%, 0.22)'
+            accentWidth: '4px',
+            accentFallback: 'hsla(0, 0%, 100%, 0.4)'
         },
 
         // --- Notices sub / prime / gift / raid ---
