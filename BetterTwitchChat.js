@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.1.0
+// @version      15.2.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -60,17 +60,21 @@
             // Couleur du texte cité : gris, plus sombre que le texte des messages.
             color: '#8f8f9a',
             // Taille de la citation, relative au texte du chat.
-            fontScale: 0.92,
+            fontScale: 0.85,
+            // Interligne de la citation. Sert aussi à caler verticalement la bulle.
+            lineHeight: 1.4,
             // Retire « Répond à » / « Replying to » et garde « @pseudo : texte ».
             hidePrefix: true,
             // Garde la petite bulle SVG à gauche de la citation.
             showIcon: true,
             // Reconstruit les emotes dans la citation (Twitch n'y met que du texte brut).
             renderEmotes: true,
-            // Recolore le « @pseudo » cité avec sa vraie couleur de chat, pour repérer
-            // d'un coup d'œil à qui le message répond.
-            colorQuotedName: true,
-            emoteHeight: '1.5em',
+            // Recolore le « @pseudo » cité avec sa vraie couleur de chat. Désactivé :
+            // la couleur attire trop l'œil sur une citation censée rester discrète.
+            colorQuotedName: false,
+            // Volontairement calé sous l'interligne : une emote plus haute ferait
+            // grandir la première ligne et désalignerait la bulle.
+            emoteHeight: '1.3em',
             // Épaisseur de la barre de couleur reprise du grade 7TV.
             accentWidth: '4px',
             accentFallback: 'hsla(0, 0%, 100%, 0.4)'
@@ -247,6 +251,19 @@
         .btc-reply-slot > * {
             align-items: flex-start !important;
         }
+        /* La bulle vit dans un wrapper en display:block plus haut qu'elle. Alignée en
+           haut de la rangée, elle flottait au-dessus du texte, et le décalage variait
+           selon que la première ligne contenait une emote ou non. On donne au wrapper
+           la hauteur exacte d'une ligne de citation et on y centre la bulle :
+           l'ancrage devient indépendant du contenu. */
+        .btc-reply-slot .tw-svg,
+        .btc-reply-slot > * > div:first-child:has(svg) {
+            height: calc(var(--btc-reply-font-scale) * ${r.lineHeight}em) !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            flex: 0 0 auto !important;
+        }
         /* Twitch tronque la citation avec overflow:hidden posé sur des wrappers
            intermédiaires : on les neutralise pour que le texte puisse se dérouler. */
         .btc-reply-slot,
@@ -266,7 +283,7 @@
             max-height: none !important;
             height: auto !important;
             font-size: calc(1em * var(--btc-reply-font-scale)) !important;
-            line-height: 1.35 !important;
+            line-height: ${r.lineHeight} !important;
             color: var(--btc-reply-color) !important;
             overflow-wrap: anywhere !important;
         }
@@ -282,12 +299,11 @@
             font-weight: 600 !important;
         }
         .btc-reply-quote .btc-reply-target {
-            font-weight: 700 !important;
-            opacity: 0.9;
+            font-weight: 600 !important;
         }
         .btc-reply-slot svg {
-            width: 1.15em !important;
-            height: 1.15em !important;
+            width: calc(var(--btc-reply-font-scale) * 1.15em) !important;
+            height: calc(var(--btc-reply-font-scale) * 1.15em) !important;
             opacity: 0.55;
             flex-shrink: 0;
         }
@@ -448,8 +464,9 @@
     const NAME_INDEX_MAX = 400;
     const nameColors = new Map(); // pseudo en minuscules -> couleur
 
+    // On indexe toujours, même quand la recoloration est désactivée : sinon activer
+    // l'option depuis la console ne colorerait que les gens vus après coup.
     const indexNameColors = (root) => {
-        if (!CONFIG.reply.colorQuotedName) return;
         let nodes;
         try { nodes = root.querySelectorAll(SEL.username); } catch (e) { return; }
         for (const el of nodes) {
@@ -506,7 +523,17 @@
 
     /** Remplace les noms d'emotes par des images et met les mentions en valeur. */
     const tokenizeQuote = (target) => {
-        const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+        // Les nœuds déjà transformés sont ignorés : sans ça, une seconde passe
+        // re-emballerait « @pseudo » dans une mention imbriquée dans la précédente.
+        const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, {
+            acceptNode: (node) => {
+                const parent = node.parentElement;
+                return parent && (parent.classList.contains('btc-reply-mention')
+                                  || parent.classList.contains('btc-reply-target'))
+                    ? NodeFilter.FILTER_REJECT
+                    : NodeFilter.FILTER_ACCEPT;
+            }
+        });
         const textNodes = [];
         let node;
         while ((node = walker.nextNode())) textNodes.push(node);
@@ -963,10 +990,20 @@
     // Point d'entrée pour bidouiller la config depuis la console.
     window.__BTC = {
         config: CONFIG,
-        reload() { injectCSS(); if (chatRoot) processLine(chatRoot); },
+        // Réapplique la config en cours. Le garde-fou d'idempotence des citations est
+        // levé au passage, sinon un réglage modifié depuis la console n'aurait aucun
+        // effet sur les messages déjà affichés.
+        reload() {
+            injectCSS();
+            if (!chatRoot) return;
+            for (const q of chatRoot.querySelectorAll('.btc-reply-quote')) {
+                delete q.dataset.btcQuote;
+            }
+            processLine(chatRoot);
+        },
         emotes: emoteIndex,
         gifts
     };
 
-    console.log('[BetterTwitchChat] v15.1.0 — chat Twitch natif + 7TV');
+    console.log('[BetterTwitchChat] v15.2.0 — chat Twitch natif + 7TV');
 })();

@@ -58,6 +58,9 @@ const FIXTURE = `<!doctype html><meta charset="utf-8"><title>fixture</title>
     color: #adadb8; font-size: 13px;
   }
   .chat-line__message { padding: 5px 20px; }
+  /* Twitch dispose la rangée de citation en flex : bulle à gauche, texte à droite. */
+  .chat-line__message-container > div:first-child > div { display: flex; align-items: center; gap: 4px; }
+  .tw-svg { display: block; }
   /* Couleurs de highlight telles que 7TV les applique. */
   .seventv-chat-message-custom-highlight { background: rgba(224,5,185,.16); border-left: 2px solid rgb(224,5,185); }
   .seventv-chat-message-first-highlight  { background: rgba(205,56,205,.153); border-left: 2px solid rgb(205,56,205); }
@@ -160,6 +163,24 @@ const r = await page.evaluate(() => {
             const t = document.querySelector('.btc-reply-quote .btc-reply-target');
             return t ? t.style.color : '';
         })(),
+        // Calage vertical de la bulle sur la première ligne de la citation. Le décalage
+        // doit être petit ET identique partout, y compris quand la première ligne
+        // contient une emote susceptible de faire grandir la ligne.
+        iconOffsets: [...document.querySelectorAll('.btc-reply-slot')].map((slot) => {
+            const svg = slot.querySelector('svg');
+            const quote = slot.querySelector('.btc-reply-quote');
+            if (!svg || !quote) return null;
+            const walker = document.createTreeWalker(quote, NodeFilter.SHOW_TEXT);
+            let first = null, n;
+            while (!first && (n = walker.nextNode())) if (n.textContent.trim()) first = n;
+            if (!first) return null;
+            const range = document.createRange();
+            range.selectNodeContents(first);
+            const line = range.getClientRects()[0];
+            if (!line) return null;
+            const s = svg.getBoundingClientRect();
+            return +((s.top + s.height / 2) - (line.top + line.height / 2)).toFixed(1);
+        }).filter(v => v !== null),
         noticeFontSize: noticeLine ? getComputedStyle(noticeLine).fontSize : '',
         resubCustomFontSize: resubCustom ? getComputedStyle(resubCustom).fontSize : '',
         massImgWidth: massImg ? getComputedStyle(massImg).width : '',
@@ -181,7 +202,7 @@ check('citation non tronquée (white-space)', r.whiteSpace, 'normal');
 check('citation non tronquée (overflow)', r.overflow, 'visible');
 check('citation non tronquée (text-overflow)', r.textOverflow, 'clip');
 check('citation sur plusieurs lignes', r.wrappedLines, (v) => v >= 3);
-check('police réduite', r.fontSize, '12.88px');
+check('police réduite', r.fontSize, '11.9px');
 check('couleur grise', r.color, 'rgb(143, 143, 154)');
 check('préfixe « Répond à » retiré', r.prefixStripped, true);
 check('emote rendue dans la citation', r.emotes, 1);
@@ -200,7 +221,9 @@ check('notice système 7TV traduite', r.sysNoticeText, 'timedout_user a été ex
 // --- 4. couleur de grade 7TV reprise sur la réponse ---
 check('accent de grade capté', r.gradeAccent, 'rgb(224, 5, 185)');
 check('filet de grade sur toute la ligne', r.lineBoxShadow, (v) => /rgb\(224, 5, 185\).*inset/.test(v));
-check('pseudo cité recoloré', r.quotedNameColored, (v) => !!v && v !== 'inherit');
+check('pseudo cité non coloré par défaut', r.quotedNameColored, '');
+check('bulle calée sur la première ligne', r.iconOffsets, (v) => v.length >= 2 && v.every(o => Math.abs(o) <= 1.5));
+check('calage identique avec et sans emote', r.iconOffsets, (v) => new Set(v).size === 1);
 
 // --- garde-fous ---
 check('racine du chat non polluée', r.rootPolluted, false);
@@ -245,6 +268,18 @@ const styleProbe = await page.evaluate(async () => {
     }
     return out;
 });
+// L'option de recoloration doit rester fonctionnelle même si elle est désactivée par défaut.
+const colorOptIn = await page.evaluate(async () => {
+    window.__BTC.config.reply.colorQuotedName = true;
+    window.__BTC.reload();
+    await new Promise(r => setTimeout(r, 80));
+    const t = document.querySelector('.btc-reply-quote .btc-reply-target');
+    const color = t ? t.style.color : '';
+    window.__BTC.config.reply.colorQuotedName = false;
+    return color;
+});
+check('recoloration du pseudo cité disponible en option', colorOptIn, (v) => !!v && v !== 'inherit');
+
 check('card : la citation retrouve sa bordure', styleProbe.card.slotBorder, 4);
 check('card : la citation retrouve son fond', styleProbe.card.slotBg, (v) => v !== 'none');
 check('inline : aucun filet sur la ligne', styleProbe.inline.lineShadow, 'none');

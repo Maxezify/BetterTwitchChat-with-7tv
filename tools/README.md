@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-28 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+39 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -13,8 +13,9 @@ node tools/tests/run.mjs
 Les assertions portent sur le style calculé, pas sur la simple présence de classes :
 troncature réellement annulée, police et couleur effectives de la citation, emote
 servie par le CDN 7TV, taille de l'illustration « cadeau mystère », couleur de grade
-reprise sur la citation, absence de débordement horizontal, idempotence après
-plusieurs passes, comportement après navigation SPA.
+reprise sur la citation, calage vertical de la bulle sur la première ligne, absence
+de débordement horizontal, idempotence après plusieurs passes, comportement après
+navigation SPA, et bon fonctionnement des trois présentations de citation.
 
 Prérequis : Playwright avec Chromium (`npm i -D playwright && npx playwright install
 chromium`, ou une installation globale — le script résout les deux).
