@@ -55,7 +55,12 @@ Autres constats utiles :
 - Les notices Twitch sont rendues dans la langue de l'interface (ici le français). Les
   notices système de 7TV restent en anglais.
 - 7TV ne colore pas les modos/VIP par défaut : c'est une règle « Custom Highlights » par
-  badge, à configurer dans l'extension.
+  badge, à configurer dans l'extension. Une fois la règle créée, il pose la couleur en
+  variables inline sur `.chat-line__message` :
+  `--seventv-chat-custom-highlight-color`, `-border-color`, `-bg`, plus un attribut
+  `data-seventv-custom-highlight-label`. Le script lit ces variables en priorité.
+- Les annonces (`.announcement-line`) enveloppent une `.chat-line__message` ordinaire ;
+  elles ne passent pas par `user-notice-line` et ne sont donc pas compactées.
 
 ### Utilisation
 

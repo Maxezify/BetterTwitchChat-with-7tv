@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.2.0
+// @version      15.3.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -60,7 +60,7 @@
             // Couleur du texte cité : gris, plus sombre que le texte des messages.
             color: '#8f8f9a',
             // Taille de la citation, relative au texte du chat.
-            fontScale: 0.85,
+            fontScale: 0.78,
             // Interligne de la citation. Sert aussi à caler verticalement la bulle.
             lineHeight: 1.4,
             // Retire « Répond à » / « Replying to » et garde « @pseudo : texte ».
@@ -604,7 +604,16 @@
         let accent = null;
         try {
             const cs = getComputedStyle(line);
-            if (parseFloat(cs.borderLeftWidth) > 0 && !isTransparent(cs.borderLeftColor)) {
+
+            // Source la plus fiable : 7TV pose la couleur de sa règle de highlight en
+            // variable inline sur la ligne. On la lit directement plutôt que de la
+            // déduire du rendu, ce qui reste juste même s'il change sa façon de peindre.
+            const declared = (cs.getPropertyValue('--seventv-chat-custom-highlight-border-color')
+                || cs.getPropertyValue('--seventv-chat-custom-highlight-color')).trim();
+
+            if (declared) {
+                accent = declared;
+            } else if (parseFloat(cs.borderLeftWidth) > 0 && !isTransparent(cs.borderLeftColor)) {
                 accent = cs.borderLeftColor;
             } else if (!isTransparent(cs.backgroundColor)) {
                 // Fond de grade semi-transparent : on en reprend la teinte, opacifiée,
@@ -1005,5 +1014,5 @@
         gifts
     };
 
-    console.log('[BetterTwitchChat] v15.2.0 — chat Twitch natif + 7TV');
+    console.log('[BetterTwitchChat] v15.3.0 — chat Twitch natif + 7TV');
 })();

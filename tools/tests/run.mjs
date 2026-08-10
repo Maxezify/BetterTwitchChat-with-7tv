@@ -46,8 +46,15 @@ const replyWithEmote = LINES.replyMod
     .replace(/(Répond à <span dir="auto">)@[^<]*(<\/span>)/, '$1@MentionUser01$2')
     .replace(/(<span dir="auto">)!time(<\/span>)/, `$1${LONG_TEXT}$2`);
 
+// 7TV pose la couleur de sa règle de highlight en variables inline sur la ligne,
+// exactement comme dans les captures de production.
 const highlightedReply = LINES.replyMod
-    .replace('class="chat-line__message"', 'class="chat-line__message seventv-chat-message-custom-highlight"');
+    .replace('class="chat-line__message"',
+        'class="chat-line__message seventv-chat-message-custom-highlight" '
+        + 'data-seventv-custom-highlight-label="M" '
+        + 'style="--seventv-chat-custom-highlight-color: #55E800;'
+        + ' --seventv-chat-custom-highlight-border-color: #55E800;'
+        + ' --seventv-chat-custom-highlight-bg: #55E80026;"');
 
 const FIXTURE = `<!doctype html><meta charset="utf-8"><title>fixture</title>
 <style>
@@ -62,7 +69,9 @@ const FIXTURE = `<!doctype html><meta charset="utf-8"><title>fixture</title>
   .chat-line__message-container > div:first-child > div { display: flex; align-items: center; gap: 4px; }
   .tw-svg { display: block; }
   /* Couleurs de highlight telles que 7TV les applique. */
-  .seventv-chat-message-custom-highlight { background: rgba(224,5,185,.16); border-left: 2px solid rgb(224,5,185); }
+  .seventv-chat-message-custom-highlight {
+    background: var(--seventv-chat-custom-highlight-bg);
+    border-left: 2px solid var(--seventv-chat-custom-highlight-border-color); }
   .seventv-chat-message-first-highlight  { background: rgba(205,56,205,.153); border-left: 2px solid rgb(205,56,205); }
   .mystery-gift-theme__image { width: 96px; height: 96px; }
 </style>
@@ -202,7 +211,7 @@ check('citation non tronquée (white-space)', r.whiteSpace, 'normal');
 check('citation non tronquée (overflow)', r.overflow, 'visible');
 check('citation non tronquée (text-overflow)', r.textOverflow, 'clip');
 check('citation sur plusieurs lignes', r.wrappedLines, (v) => v >= 3);
-check('police réduite', r.fontSize, '11.9px');
+check('police réduite', r.fontSize, '10.92px');
 check('couleur grise', r.color, 'rgb(143, 143, 154)');
 check('préfixe « Répond à » retiré', r.prefixStripped, true);
 check('emote rendue dans la citation', r.emotes, 1);
@@ -219,8 +228,8 @@ check('nombre de gifts annoncé lu', r.giftExpected, 50);
 check('notice système 7TV traduite', r.sysNoticeText, 'timedout_user a été exclu 30 s');
 
 // --- 4. couleur de grade 7TV reprise sur la réponse ---
-check('accent de grade capté', r.gradeAccent, 'rgb(224, 5, 185)');
-check('filet de grade sur toute la ligne', r.lineBoxShadow, (v) => /rgb\(224, 5, 185\).*inset/.test(v));
+check('accent de grade lu depuis la variable 7TV', r.gradeAccent, '#55E800');
+check('filet de grade sur toute la ligne', r.lineBoxShadow, (v) => /rgb\(85, 232, 0\).*inset/.test(v));
 check('pseudo cité non coloré par défaut', r.quotedNameColored, '');
 check('bulle calée sur la première ligne', r.iconOffsets, (v) => v.length >= 2 && v.every(o => Math.abs(o) <= 1.5));
 // Égalité stricte serait trompeuse : une emote décale la ligne de base d'une fraction
@@ -244,13 +253,18 @@ await page.evaluate(() => {
 await page.waitForTimeout(150);
 const accentBefore = await page.evaluate(() =>
     document.querySelector('#late .chat-line__message').style.getPropertyValue('--btc-reply-accent'));
-await page.evaluate(() =>
-    document.querySelector('#late .chat-line__message').classList.add('seventv-chat-message-custom-highlight'));
+// En production, 7TV ajoute la classe ET les variables de couleur d'un seul geste.
+await page.evaluate(() => {
+    const el = document.querySelector('#late .chat-line__message');
+    el.style.setProperty('--seventv-chat-custom-highlight-border-color', '#E005B9');
+    el.style.setProperty('--seventv-chat-custom-highlight-bg', '#E005B926');
+    el.classList.add('seventv-chat-message-custom-highlight');
+});
 await page.waitForTimeout(200);
 const accentAfter = await page.evaluate(() =>
     document.querySelector('#late .chat-line__message').style.getPropertyValue('--btc-reply-accent'));
 check('pas d\'accent sans highlight', accentBefore, '');
-check('accent capté quand 7TV colore après coup', accentAfter, 'rgb(224, 5, 185)');
+check('accent capté quand 7TV colore après coup', accentAfter, '#E005B9');
 
 // --- 6. les styles alternatifs restent fonctionnels ---
 const styleProbe = await page.evaluate(async () => {
