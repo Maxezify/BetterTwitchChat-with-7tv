@@ -21,6 +21,14 @@ Userscript Tampermonkey qui rend le chat de Twitch plus lisible, compatible avec
 2. Créer un nouveau script et y coller le contenu de [`BetterTwitchChat.js`](BetterTwitchChat.js).
 3. Recharger Twitch.
 
+Les mises à jour suivantes sont automatiques : l'en-tête déclare `@updateURL` et
+`@downloadURL`, Tampermonkey vérifie périodiquement et propose la nouvelle version.
+
+> Les deux URLs pointent sur la branche `claude/twitch-chat-7tv-userscript-1hh5y8`,
+> seule à porter la v15 — `main` en est encore à la v14. **Si cette branche est
+> fusionnée dans `main`, remplacer le segment de branche par `main` dans les deux URLs**,
+> sinon la mise à jour automatique cassera le jour où la branche disparaîtra.
+
 ## Réglages
 
 Tout est regroupé dans le bloc `CONFIG` en haut du fichier :
@@ -58,9 +66,20 @@ __BTC.config.reply.style = 'inline'; __BTC.reload();
 
 ```js
 __BTC.check()        // version en place, style actif, tailles calculées
+__BTC.selfCheck()    // état de chaque point d'accroche dans le DOM
 __BTC.whyFontSize()  // toutes les règles CSS qui visent la citation, dans l'ordre
                      // de la cascade — pour savoir qui impose une taille
 ```
+
+Un auto-diagnostic se lance seul 20 secondes après le démarrage. Si un point
+d'accroche ne correspond plus au DOM, il écrit un avertissement en console nommant
+l'ancre fautive et renvoyant vers l'enregistreur. La v14 était morte en silence faute
+d'un tel contrôle.
+
+Il distingue deux cas. Pour les ancres structurelles (conteneur du chat, ligne,
+pseudo…), l'absence suffit à conclure. Pour la citation, non : un chat sans réponse
+n'est pas un chat cassé. Le signal retenu est donc positif — Twitch annonce une réponse
+dans l'`aria-label` de la ligne, et nous n'avons pas su y trouver la citation.
 
 ### Présentation de la citation (`reply.style`)
 
@@ -105,7 +124,7 @@ styled-components changeant à chaque build de Twitch.
 
 - [`tools/7tv-dom-recorder.user.js`](tools/7tv-dom-recorder.user.js) — capture la
   structure réelle du chat pour diagnostiquer une future casse.
-- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 48 vérifications du script contre du
+- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 58 vérifications du script contre du
   DOM Twitch réellement capturé, exécutées dans Chromium.
 
 Voir [`tools/README.md`](tools/README.md).

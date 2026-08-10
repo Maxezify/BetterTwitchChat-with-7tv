@@ -1,17 +1,23 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.4.0
+// @version      15.5.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=twitch.tv
 // @grant        none
 // @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/Maxezify/BetterTwitchChat-with-7tv/claude/twitch-chat-7tv-userscript-1hh5y8/BetterTwitchChat.js
+// @downloadURL  https://raw.githubusercontent.com/Maxezify/BetterTwitchChat-with-7tv/claude/twitch-chat-7tv-userscript-1hh5y8/BetterTwitchChat.js
 // ==/UserScript==
 
 /*
  * v15 — réécriture complète.
+ *
+ * Mise à jour automatique : @updateURL / @downloadURL pointent sur la branche de
+ * travail, seule à porter la v15. Si elle est un jour fusionnée dans main, il faut
+ * remplacer le segment de branche par `main` dans les deux URLs de l'en-tête.
  *
  * La nouvelle extension 7TV (ID lppmekppnliemjclknbagdhoocikieoi) ne remplace plus le
  * moteur de rendu du chat : elle décore le chat natif de Twitch. Toutes les classes
@@ -39,7 +45,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.4.0';
+    const VERSION = '15.5.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -133,12 +139,19 @@
 
     const log = (...args) => { if (CONFIG.debug) console.log('[BTC]', ...args); };
 
+    // Compteurs alimentés par le traitement, lus par l'auto-diagnostic.
+    const diag = { lignes: 0, reponses: 0, reponsesRatees: 0, notices: 0, verifieA: 0 };
+
     // =========================================================================
     // TEXTES — reconnaissance FR + EN
     // =========================================================================
     const RE = {
         // « Répond à @user : texte » / « Replying to @user: text »
         replyPrefix: /^\s*(?:Répond\s+à|En\s+réponse\s+à|Replying\s+to)\s*/i,
+        // Twitch annonce une réponse dans l'aria-label de la ligne : « Réponse à X, … ».
+        // Sert à repérer une réponse que nous n'aurions PAS su découper — le signal de
+        // casse le plus fiable, car positif plutôt que fondé sur une absence.
+        replyAria: /^\s*(?:Réponse\s+à|Replying\s+to|En\s+réponse\s+à)/i,
         // « offre 50 abonnements de niveau 1 à la communauté » / « is gifting 50 Tier 1 Subs »
         massGift: /(?:offre|a\s+offert)\s+([\d\s .,]+?)\s*abonnements?\b|is\s+gifting\s+([\d,]+)\s*Tier/i,
         // « a offert un abonnement de niveau 1 à X » / « Gifted a Tier 1 Sub to X »
@@ -648,9 +661,19 @@
         else line.style.removeProperty('--btc-reply-accent');
     };
 
+    /** Twitch signale une réponse par l'aria-label ; 7TV par un attribut dédié. */
+    const looksLikeReply = (line) => !!line.dataset.seventvReplyParentLogin
+        || RE.replyAria.test(line.getAttribute('aria-label') || '');
+
     const processReply = (line) => {
         const parts = findReplyParts(line);
-        if (!parts) return;
+        if (!parts) {
+            // Twitch dit que c'est une réponse mais nous n'avons pas trouvé la citation :
+            // la structure a changé. C'est exactement ce qui a tué la v14 en silence.
+            if (looksLikeReply(line)) diag.reponsesRatees++;
+            return;
+        }
+        diag.reponses++;
         const { slot, quote } = parts;
 
         line.classList.add('btc-reply');
@@ -860,6 +883,7 @@
     const processNotice = (notice) => {
         if (notice.dataset.btcNotice === '1') return;
         notice.dataset.btcNotice = '1';
+        diag.notices++;
 
         translateNotice(notice);
         compactNotice(notice);
@@ -893,8 +917,71 @@
         }
 
         // Messages utilisateur
-        if (element.matches?.(SEL.line)) processReply(element);
-        for (const line of element.querySelectorAll(SEL.line)) processReply(line);
+        if (element.matches?.(SEL.line)) { diag.lignes++; processReply(element); }
+        for (const line of element.querySelectorAll(SEL.line)) { diag.lignes++; processReply(line); }
+    };
+
+    // =========================================================================
+    // AUTO-DIAGNOSTIC
+    // La v14 est morte en silence : ses sélecteurs ne correspondaient plus à rien et
+    // rien ne le signalait. Twitch change ses classes hachées à chaque build et 7TV
+    // réécrit son extension ; ce contrôle transforme une casse muette en avertissement
+    // lisible, avec le renvoi vers l'enregistreur DOM.
+    // =========================================================================
+    const SELF_CHECK_DELAY = 20000;
+    let selfCheckTimer = null;
+    let selfCheckDone = false;
+
+    const runSelfCheck = ({ verbeux = false } = {}) => {
+        const sondes = [];
+        const add = (nom, ok, indice) => sondes.push({ ancre: nom, ok, indice });
+        const root = chatRoot;
+
+        add('conteneur du chat', !!root, SEL.chatRoot[0]);
+        if (root) {
+            add('ligne de message', !!root.querySelector(SEL.line), SEL.line);
+            add('corps du message', !!root.querySelector(SEL.body), SEL.body);
+            add('pseudo', !!root.querySelector(SEL.username), SEL.username);
+            add('conteneur de ligne', !!root.querySelector(SEL.lineContainer), SEL.lineContainer);
+        }
+        add('feuille de style injectée', !!document.getElementById('btc-styles'), '#btc-styles');
+        // Ancre conditionnelle : on ne peut pas conclure de l'absence de réponse, mais
+        // une réponse annoncée par Twitch et non découpée est une preuve de casse.
+        add('bloc de citation', diag.reponsesRatees === 0,
+            '.chat-line__message-container > premier enfant non vide');
+
+        diag.verifieA = Date.now();
+        const cassees = sondes.filter(p => !p.ok);
+        const inactif = diag.lignes === 0 && diag.notices === 0;
+
+        if (cassees.length && !inactif) {
+            console.warn(
+                `[BetterTwitchChat] ${cassees.length} ancre(s) ne correspondent plus au DOM.\n` +
+                cassees.map(p => `  ✗ ${p.ancre} — ${p.indice}`).join('\n') +
+                '\nTwitch ou 7TV a probablement changé sa structure. Pour la recapturer :' +
+                '\ntools/7tv-dom-recorder.user.js du dépôt, puis transmettre le JSON exporté.'
+            );
+        } else if (verbeux) {
+            console.log('[BetterTwitchChat] toutes les ancres répondent.');
+        }
+        if (verbeux) console.table(sondes);
+
+        return {
+            ok: cassees.length === 0,
+            inactif,
+            sondes,
+            compteurs: { ...diag }
+        };
+    };
+
+    const scheduleSelfCheck = () => {
+        clearTimeout(selfCheckTimer);
+        selfCheckDone = false;
+        selfCheckTimer = setTimeout(() => {
+            if (selfCheckDone) return;
+            selfCheckDone = true;
+            runSelfCheck();
+        }, SELF_CHECK_DELAY);
     };
 
     // =========================================================================
@@ -955,6 +1042,7 @@
             attributeFilter: ['class', 'data-seventv-processed']
         });
         processLine(root);
+        scheduleSelfCheck();
         log('démarré sur', root.className);
     };
 
@@ -985,6 +1073,8 @@
     const teardown = () => {
         if (observer) { observer.disconnect(); observer = null; }
         clearInterval(retryTimer);
+        clearTimeout(selfCheckTimer);
+        diag.lignes = diag.reponses = diag.reponsesRatees = diag.notices = 0;
         queue = [];
         frameScheduled = false;
         chatRoot = null;
@@ -1030,6 +1120,10 @@
         },
         emotes: emoteIndex,
         gifts,
+        // Contrôle des points d'accroche. Lancé seul 20 s après le démarrage ; à
+        // rappeler à la main pour voir le détail.
+        selfCheck: () => runSelfCheck({ verbeux: true }),
+
         // Diagnostic : dit quelle version tourne réellement et ce qui est appliqué.
         check() {
             const quote = document.querySelector('.btc-reply-quote');

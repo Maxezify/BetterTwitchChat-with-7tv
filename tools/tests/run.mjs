@@ -93,6 +93,8 @@ ${LINES.plain}
 
 // ---------------------------------------------------------------------------
 const checks = [];
+const RAW_URL = 'https://raw.githubusercontent.com/Maxezify/BetterTwitchChat-with-7tv/'
+    + 'claude/twitch-chat-7tv-userscript-1hh5y8/BetterTwitchChat.js';
 const check = (name, actual, expected) => {
     const ok = typeof expected === 'function' ? expected(actual) : Object.is(actual, expected);
     checks.push({ name, ok, actual, expected: typeof expected === 'function' ? '(prédicat)' : expected });
@@ -265,6 +267,42 @@ const accentAfter = await page.evaluate(() =>
     document.querySelector('#late .chat-line__message').style.getPropertyValue('--btc-reply-accent'));
 check('pas d\'accent sans highlight', accentBefore, '');
 check('accent capté quand 7TV colore après coup', accentAfter, '#E005B9');
+
+// --- mise à jour automatique : Tampermonkey a besoin des deux directives ---
+check('@updateURL présent', SCRIPT, (t) => t.includes('// @updateURL') && t.includes(RAW_URL));
+check('@downloadURL présent', SCRIPT, (t) => t.includes('// @downloadURL') && t.includes(RAW_URL));
+check('version de l\'en-tête alignée sur VERSION', SCRIPT, (t) => {
+    const entete = (t.match(/@version\s+([\d.]+)/) || [])[1];
+    const constante = (t.match(/const VERSION = '([\d.]+)'/) || [])[1];
+    return entete && entete === constante;
+});
+
+// --- auto-diagnostic : sain d'abord, cassé ensuite ---
+const sain = await page.evaluate(() => window.__BTC.selfCheck());
+check('auto-diagnostic : toutes les ancres répondent', sain.ok, true);
+check('auto-diagnostic : chat non considéré inactif', sain.inactif, false);
+check('auto-diagnostic : réponses comptées', sain.compteurs.reponses, (v) => v >= 3);
+check('auto-diagnostic : aucune réponse ratée', sain.compteurs.reponsesRatees, 0);
+
+// Casse simulée : Twitch annonce une réponse dans l'aria-label, mais la citation n'est
+// plus là où nous la cherchons. C'est le scénario exact qui a tué la v14 en silence.
+const casse = await page.evaluate(() => {
+    const root = document.querySelector('[data-test-selector="chat-scrollable-area__message-container"]');
+    const holder = document.createElement('div');
+    holder.innerHTML = window.__LATER.replyMod;
+    const line = holder.firstElementChild.querySelector('.chat-line__message');
+    line.setAttribute('aria-label', 'Réponse à Quelqun, Envoyé à 14:28 et Bot : test');
+    // on vide l'emplacement où vit la citation
+    line.querySelector('.chat-line__message-container').firstElementChild.innerHTML = '';
+    root.appendChild(holder.firstElementChild);
+    return null;
+});
+await page.waitForTimeout(250);
+const alerte = await page.evaluate(() => window.__BTC.selfCheck());
+check('auto-diagnostic : casse de la citation détectée', alerte.ok, false);
+check('auto-diagnostic : la bonne ancre est désignée', alerte.sondes,
+    (ss) => ss.some(p => p.ancre === 'bloc de citation' && !p.ok));
+check('auto-diagnostic : réponse ratée comptabilisée', alerte.compteurs.reponsesRatees, (v) => v >= 1);
 
 // --- 6. les styles alternatifs restent fonctionnels ---
 const styleProbe = await page.evaluate(async () => {
