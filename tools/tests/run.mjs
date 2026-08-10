@@ -226,6 +226,34 @@ const accentAfter = await page.evaluate(() =>
 check('pas d\'accent sans highlight', accentBefore, '');
 check('accent capté quand 7TV colore après coup', accentAfter, 'rgb(224, 5, 185)');
 
+// --- 6. les styles alternatifs restent fonctionnels ---
+const styleProbe = await page.evaluate(async () => {
+    const line = document.querySelector('.chat-line__message.btc-reply');
+    const slot = line.querySelector('.btc-reply-slot');
+    const read = () => ({
+        lineShadow: getComputedStyle(line).boxShadow,
+        slotBorder: parseFloat(getComputedStyle(slot).borderLeftWidth),
+        slotBg: getComputedStyle(slot).backgroundImage,
+        quoteWrap: getComputedStyle(line.querySelector('.btc-reply-quote')).whiteSpace
+    });
+    const out = {};
+    for (const style of ['card', 'inline', 'rail']) {
+        window.__BTC.config.reply.style = style;
+        window.__BTC.reload();
+        await new Promise(r => setTimeout(r, 60));
+        out[style] = read();
+    }
+    return out;
+});
+check('card : la citation retrouve sa bordure', styleProbe.card.slotBorder, 4);
+check('card : la citation retrouve son fond', styleProbe.card.slotBg, (v) => v !== 'none');
+check('inline : aucun filet sur la ligne', styleProbe.inline.lineShadow, 'none');
+check('inline : aucun cadre sur la citation', styleProbe.inline.slotBorder, 0);
+check('rail : filet sur la ligne', styleProbe.rail.lineShadow, (v) => v !== 'none' && /inset/.test(v));
+check('rail : aucun cadre sur la citation', styleProbe.rail.slotBorder, 0);
+check('citation déroulée dans les trois styles',
+    ['card', 'inline', 'rail'].every(s => styleProbe[s].quoteWrap === 'normal'), true);
+
 await page.evaluate(() => history.pushState({}, '', '/une-autre-chaine'));
 await page.waitForTimeout(1300);
 await addLines(['replyMod']);

@@ -57,9 +57,13 @@ __BTC.config.reply.style = 'inline'; __BTC.reload();
 
 | Valeur | Rendu |
 |---|---|
-| `rail` *(défaut)* | La citation fait corps avec le message : aucun cadre, aucun fond propre. Un filet vertical dans la couleur de grade court le long de l'ensemble, et marque les réponses même sans highlight 7TV. |
-| `inline` | Identique, mais sans filet neutre : seule la couleur posée par 7TV apparaît. Le rendu le plus discret. |
+| `rail` *(défaut retenu)* | La citation fait corps avec le message : aucun cadre, aucun fond propre. Un filet vertical de 4 px court le long de l'ensemble, dans la couleur de grade 7TV quand il y en a une, en gris neutre sinon — donc toutes les réponses sont marquées. |
+| `inline` | Identique, mais sans filet neutre : seule la couleur posée par 7TV apparaît. Les réponses de gens sans grade ne se distinguent que par leur fond éclairci. Équivaut à `rail` avec `accentFallback: 'transparent'`. |
 | `card` | La citation est un bloc détaché avec son propre fond et sa bordure. |
+
+Si le filet gris te paraît trop marqué à l'usage, `reply.accentFallback` le règle sans
+changer de style : `'transparent'` le supprime sur les réponses non colorées,
+`'hsla(0, 0%, 100%, 0.25)'` l'atténue.
 
 ## Note sur les couleurs de grade
 

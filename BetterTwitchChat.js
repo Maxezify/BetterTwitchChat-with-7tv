@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.0.0
+// @version      15.1.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -968,5 +968,5 @@
         gifts
     };
 
-    console.log('[BetterTwitchChat] v15.0.0 — chat Twitch natif + 7TV');
+    console.log('[BetterTwitchChat] v15.1.0 — chat Twitch natif + 7TV');
 })();
