@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.3.0
+// @version      15.3.1
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -38,6 +38,8 @@
 
 (function () {
     'use strict';
+
+    const VERSION = '15.3.1';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -258,7 +260,7 @@
            l'ancrage devient indépendant du contenu. */
         .btc-reply-slot .tw-svg,
         .btc-reply-slot > * > div:first-child:has(svg) {
-            height: calc(var(--btc-reply-font-scale) * ${r.lineHeight}em) !important;
+            height: calc(var(--btc-reply-font-scale, ${r.fontScale}) * ${r.lineHeight}em) !important;
             display: flex !important;
             align-items: center !important;
             justify-content: center !important;
@@ -282,7 +284,7 @@
             -webkit-box-orient: initial !important;
             max-height: none !important;
             height: auto !important;
-            font-size: calc(1em * var(--btc-reply-font-scale)) !important;
+            font-size: calc(1em * var(--btc-reply-font-scale, ${r.fontScale})) !important;
             line-height: ${r.lineHeight} !important;
             color: var(--btc-reply-color) !important;
             overflow-wrap: anywhere !important;
@@ -302,8 +304,8 @@
             font-weight: 600 !important;
         }
         .btc-reply-slot svg {
-            width: calc(var(--btc-reply-font-scale) * 1.15em) !important;
-            height: calc(var(--btc-reply-font-scale) * 1.15em) !important;
+            width: calc(var(--btc-reply-font-scale, ${r.fontScale}) * 1.15em) !important;
+            height: calc(var(--btc-reply-font-scale, ${r.fontScale}) * 1.15em) !important;
             opacity: 0.55;
             flex-shrink: 0;
         }
@@ -484,11 +486,14 @@
     };
 
     /** Recolore le « @pseudo » de la citation avec la couleur de chat de la personne. */
-    const colorQuotedName = (quote) => {
+    const colorQuotedName = (quote, line) => {
         if (!CONFIG.reply.colorQuotedName) return;
         const span = quote.querySelector(':scope > span');
         if (!span) return;
-        const login = span.textContent.trim().replace(/^@/, '').toLowerCase();
+        // 7TV expose le login exact de la personne citée sur la ligne. On le préfère au
+        // texte affiché, qui peut être un nom international ou une casse différente.
+        const login = (line && line.dataset.seventvReplyParentLogin
+            || span.textContent.trim().replace(/^@/, '')).toLowerCase();
         if (!login) return;
         span.classList.add('btc-reply-target');
         const color = nameColors.get(login);
@@ -654,7 +659,7 @@
         }
 
         if (CONFIG.reply.hidePrefix) stripReplyPrefix(quote);
-        colorQuotedName(quote);
+        colorQuotedName(quote, line);
 
         if (CONFIG.reply.renderEmotes) {
             const target = findQuoteTextNode(quote) || quote;
@@ -1011,8 +1016,25 @@
             processLine(chatRoot);
         },
         emotes: emoteIndex,
-        gifts
+        gifts,
+        // Diagnostic : dit quelle version tourne réellement et ce qui est appliqué.
+        check() {
+            const quote = document.querySelector('.btc-reply-quote');
+            const body = document.querySelector(SEL.body);
+            const info = {
+                version: VERSION,
+                style: CONFIG.reply.style,
+                fontScale: CONFIG.reply.fontScale,
+                tailleCitation: quote ? getComputedStyle(quote).fontSize : '(aucune réponse à l\'écran)',
+                tailleMessage: body ? getComputedStyle(body).fontSize : '(aucun message à l\'écran)',
+                reponsesTraitees: document.querySelectorAll('.btc-reply').length,
+                emotesIndexees: emoteIndex.size,
+                cssInjecte: !!document.getElementById('btc-styles')
+            };
+            console.table(info);
+            return info;
+        }
     };
 
-    console.log('[BetterTwitchChat] v15.3.0 — chat Twitch natif + 7TV');
+    console.log(`[BetterTwitchChat] v${VERSION} — chat Twitch natif + 7TV`);
 })();

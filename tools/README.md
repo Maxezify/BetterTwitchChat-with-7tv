@@ -61,6 +61,13 @@ Autres constats utiles :
   `data-seventv-custom-highlight-label`. Le script lit ces variables en priorité.
 - Les annonces (`.announcement-line`) enveloppent une `.chat-line__message` ordinaire ;
   elles ne passent pas par `user-notice-line` et ne sont donc pas compactées.
+- Sur une réponse, 7TV pose `data-seventv-reply-parent-login` et
+  `-display-name` sur la ligne : le login exact de la personne citée, sans avoir à
+  analyser le texte de la citation.
+- 7TV applique aux emotes un `style` inline `width/max-width/max-height` en `!important`.
+  Un style inline important l'emporte sur une feuille d'auteur : ne pas compter sur du
+  CSS pour redimensionner *ses* emotes (celles reconstruites dans les citations portent
+  notre propre classe et ne sont pas concernées).
 
 ### Utilisation
 

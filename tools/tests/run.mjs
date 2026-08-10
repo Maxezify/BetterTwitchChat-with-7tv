@@ -285,6 +285,25 @@ const styleProbe = await page.evaluate(async () => {
     }
     return out;
 });
+// Filet de sécurité : si la variable de scale disparaît (feuille concurrente, ordre de
+// cascade), calc() deviendrait invalide et font-size retomberait sur l'héritage, soit la
+// taille du message. Le repli inscrit dans var() doit empêcher ça.
+const scaleFallback = await page.evaluate(async () => {
+    const root = document.documentElement;
+    root.style.setProperty('--btc-reply-font-scale', 'initial');
+    await new Promise(r => setTimeout(r, 50));
+    const size = getComputedStyle(document.querySelector('.btc-reply-quote')).fontSize;
+    root.style.removeProperty('--btc-reply-font-scale');
+    return size;
+});
+check('la citation reste réduite sans la variable', scaleFallback, '10.92px');
+
+// Le diagnostic intégré doit rapporter la version et les tailles réellement appliquées.
+const diag = await page.evaluate(() => window.__BTC.check());
+check('__BTC.check() rapporte la version', diag.version, (v) => /^\d+\.\d+\.\d+$/.test(v));
+check('__BTC.check() mesure la citation', diag.tailleCitation, '10.92px');
+check('__BTC.check() mesure le message', diag.tailleMessage, '14px');
+
 // L'option de recoloration doit rester fonctionnelle même si elle est désactivée par défaut.
 const colorOptIn = await page.evaluate(async () => {
     window.__BTC.config.reply.colorQuotedName = true;
