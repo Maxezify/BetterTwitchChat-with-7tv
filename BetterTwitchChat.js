@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.5.1
+// @version      15.6.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -45,7 +45,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.5.1';
+    const VERSION = '15.6.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -71,6 +71,8 @@
             fontScale: 0.78,
             // Interligne de la citation. Sert aussi à caler verticalement la bulle.
             lineHeight: 1.4,
+            // Espace entre le bas de la citation et le début du message.
+            gap: '5px',
             // Retire « Répond à » / « Replying to » et garde « @pseudo : texte ».
             hidePrefix: true,
             // Garde la petite bulle SVG à gauche de la citation.
@@ -218,7 +220,7 @@
             background: none !important;
             border: 0 !important;
             padding: 0 !important;
-            margin: 0 0 1px 0 !important;
+            margin: 0 0 ${r.gap} 0 !important;
         }`,
 
         inline: `
@@ -226,7 +228,7 @@
             background: none !important;
             border: 0 !important;
             padding: 0 !important;
-            margin: 0 0 1px 0 !important;
+            margin: 0 0 ${r.gap} 0 !important;
         }`,
 
         card: `
@@ -235,7 +237,7 @@
             border-left: ${r.accentWidth} solid var(--btc-reply-accent);
             border-radius: 2px;
             padding: 2px 6px !important;
-            margin: 1px 0 3px 0 !important;
+            margin: 1px 0 ${r.gap} 0 !important;
         }`
     });
 

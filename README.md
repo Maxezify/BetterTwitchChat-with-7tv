@@ -40,6 +40,7 @@ reply.blockTint       // fond du bloc de citation (style 'card' uniquement)
 reply.color           // couleur du texte cité
 reply.fontScale       // taille de la citation (0.78 = 78 % du texte normal)
 reply.lineHeight      // interligne de la citation, sert aussi à caler la bulle
+reply.gap             // espace entre la citation et le message
 reply.hidePrefix      // retire « Répond à », garde « @pseudo : texte »
 reply.showIcon        // garde la bulle SVG à gauche de la citation
 reply.renderEmotes    // reconstruit les emotes dans la citation
@@ -124,7 +125,7 @@ styled-components changeant à chaque build de Twitch.
 
 - [`tools/7tv-dom-recorder.user.js`](tools/7tv-dom-recorder.user.js) — capture la
   structure réelle du chat pour diagnostiquer une future casse.
-- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 58 vérifications du script contre du
+- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 60 vérifications du script contre du
   DOM Twitch réellement capturé, exécutées dans Chromium.
 
 Voir [`tools/README.md`](tools/README.md).

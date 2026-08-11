@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-58 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+60 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 

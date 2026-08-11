@@ -174,6 +174,15 @@ const r = await page.evaluate(() => {
             const t = document.querySelector('.btc-reply-quote .btc-reply-target');
             return t ? t.style.color : '';
         })(),
+        // Écart entre le bas de la citation et le haut du message : à 1 px la citation
+        // paraissait collée au message.
+        gapCitationMessage: [...document.querySelectorAll('.chat-line__message.btc-reply')]
+            .map((line) => {
+                const slot = line.querySelector('.btc-reply-slot');
+                const corps = line.querySelector('.chat-line__no-background');
+                if (!slot || !corps) return null;
+                return Math.round(corps.getBoundingClientRect().top - slot.getBoundingClientRect().bottom);
+            }).filter(v => v !== null),
         // Calage vertical de la bulle sur la première ligne de la citation. Le décalage
         // doit être petit ET identique partout, y compris quand la première ligne
         // contient une emote susceptible de faire grandir la ligne.
@@ -207,6 +216,7 @@ const r = await page.evaluate(() => {
 // --- 1. fond plus clair sur les messages qui répondent ---
 check('réponses détectées', r.replyLines, 3);
 check('citation sans cadre détaché (style rail)', r.slotHasOwnBox, false);
+check('espace entre citation et message', r.gapCitationMessage, (v) => v.length >= 2 && v.every(g => g >= 4));
 
 // --- 2. réponse visible en entier, plus petite, grise, avec emotes ---
 check('citation non tronquée (white-space)', r.whiteSpace, 'normal');
