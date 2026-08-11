@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.6.0
+// @version      15.7.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -45,7 +45,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.6.0';
+    const VERSION = '15.7.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -72,7 +72,7 @@
             // Interligne de la citation. Sert aussi à caler verticalement la bulle.
             lineHeight: 1.4,
             // Espace entre le bas de la citation et le début du message.
-            gap: '5px',
+            gap: '10px',
             // Retire « Répond à » / « Replying to » et garde « @pseudo : texte ».
             hidePrefix: true,
             // Garde la petite bulle SVG à gauche de la citation.
@@ -255,6 +255,8 @@
         // (0,2,1) : nous passons devant quel que soit l'ordre, sans dépendre du hachage
         // de Twitch qui change à chaque build.
         const Q = 'p.btc-reply-quote.btc-reply-quote';
+        const NL = '.btc-notice-line.btc-notice-line';
+        const NC = '.btc-notice-card.btc-notice-card';
         const S = '.btc-reply-slot.btc-reply-slot';
         const L = '.chat-line__message.btc-reply.btc-reply';
 
@@ -341,55 +343,72 @@
 
         /* ---------- 3. Notices sub / prime / gift compactées ---------- */
         ${c.enabled ? `
-        .btc-notice-card {
+        ${NC} {
             padding: 3px 8px !important;
             margin: 1px 0 !important;
         }
-        .btc-notice-bar {
+        ${NC} .btc-notice-bar {
             width: 3px !important;
             min-width: 3px !important;
         }
-        .btc-notice-line {
+        ${NL} {
             font-size: ${c.fontSize} !important;
             line-height: ${c.lineHeight} !important;
             padding: 0 !important;
         }
-        .btc-notice-line p,
-        .btc-notice-line span:not(.btc-gift-recipient) {
+        ${NL} p,
+        ${NL} span:not(.btc-gift-recipient) {
             line-height: ${c.lineHeight} !important;
         }
-        .btc-notice-line > * svg {
+        ${NL} > * svg {
             width: ${c.iconSize} !important;
             height: ${c.iconSize} !important;
         }
         /* Le message personnalisé d'un resub reste à taille normale. */
-        .btc-notice-line ${SEL.resubCustom} {
+        ${NL} ${SEL.resubCustom} {
             font-size: 14px !important;
             line-height: 1.5 !important;
             margin-top: 2px !important;
         }
-        .btc-notice-line ${SEL.resubCustom} svg {
+        ${NL} ${SEL.resubCustom} svg {
             width: auto !important;
             height: auto !important;
         }
         /* Illustration « cadeau mystère » : de 100 px de haut à une vignette. */
-        .btc-notice-line ${SEL.massGiftImage} {
+        ${NL} ${SEL.massGiftImage} {
             width: 26px !important;
             height: 26px !important;
             object-fit: contain !important;
             margin: 0 6px 0 0 !important;
         }
-        .btc-notice-line ${SEL.massGiftOverlay} {
+        ${NL} ${SEL.massGiftOverlay} {
             display: none !important;
         }
-        .btc-notice-line ${SEL.massGiftName} {
+        ${NL} ${SEL.massGiftName} {
             display: inline !important;
             font-size: ${c.fontSize} !important;
             margin: 0 !important;
         }
+        /* Twitch enveloppe le pseudo dans des conteneurs rendus en bloc, ce qui le
+           pousse sur sa propre ligne au-dessus du texte de la notice. On les remet en
+           ligne pour que la notice tienne en un seul paragraphe. Le conteneur
+           intermédiaire est visé par sa structure et non par sa classe hachée. */
+        ${NL} span:has(> .chatter-name),
+        ${NL} .chatter-name,
+        ${NL} .chatter-name span {
+            display: inline !important;
+        }
+
+        /* Le conteneur du nom du donateur peut être une colonne flex, qui garderait le
+           pseudo au-dessus du texte malgré le display:inline. On le repasse en bloc.
+           Visé par sa structure : sa classe est un hachage. */
+        ${NL} div:has(> ${SEL.massGiftName}) {
+            display: block !important;
+        }
+
         /* Le nom du donateur est un <p> passé en inline : sans ça, il se recolle au
            texte qui suit (« SquidNinja00offre 50 abonnements »). */
-        .btc-notice-line ${SEL.massGiftName}::after {
+        ${NL} ${SEL.massGiftName}::after {
             content: " ";
             white-space: pre;
         }

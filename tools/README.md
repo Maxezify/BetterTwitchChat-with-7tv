@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-60 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+62 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -59,6 +59,11 @@ Autres constats utiles :
   variables inline sur `.chat-line__message` :
   `--seventv-chat-custom-highlight-color`, `-border-color`, `-bg`, plus un attribut
   `data-seventv-custom-highlight-label`. Le script lit ces variables en priorité.
+- Dans les notices, Twitch enveloppe le pseudo dans des conteneurs rendus en bloc
+  (`span > .chatter-name`), ce qui le pousse sur sa propre ligne au-dessus du texte.
+  Le bloc texte du gift multiple est en plus une colonne flex. Les deux sont remis en
+  ligne, ciblés par leur structure (`span:has(> .chatter-name)`) et non par leurs
+  classes hachées.
 - Les annonces (`.announcement-line`) enveloppent une `.chat-line__message` ordinaire ;
   elles ne passent pas par `user-notice-line` et ne sont donc pas compactées.
 - Sur une réponse, 7TV pose `data-seventv-reply-parent-login` et

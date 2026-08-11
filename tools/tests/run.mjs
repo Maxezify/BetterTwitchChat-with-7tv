@@ -74,6 +74,14 @@ const FIXTURE = `<!doctype html><meta charset="utf-8"><title>fixture</title>
     border-left: 2px solid var(--seventv-chat-custom-highlight-border-color); }
   .seventv-chat-message-first-highlight  { background: rgba(205,56,205,.153); border-left: 2px solid rgb(205,56,205); }
   .mystery-gift-theme__image { width: 96px; height: 96px; }
+  /* Twitch rend les conteneurs du pseudo en bloc dans les notices, ce qui le pousse
+     sur sa propre ligne au-dessus du texte. Déclaré important pour que le test prouve
+     que nos règles l'emportent, comme pour la taille de la citation. */
+  [data-test-selector="user-notice-line"] p > span:first-child { display: block !important; }
+  [data-test-selector="user-notice-line"] .chatter-name { display: block !important; }
+  /* Le bloc texte du gift multiple est une colonne : pseudo au-dessus du message. */
+  [data-test-selector="user-notice-line"] div:has(> .mystery-gift-theme__displayname) {
+    display: flex !important; flex-direction: column !important; }
 </style>
 <div data-test-selector="chat-scrollable-area__message-container" class="chat-scrollable-area__message-container">
 ${LINES.status}
@@ -174,6 +182,43 @@ const r = await page.evaluate(() => {
             const t = document.querySelector('.btc-reply-quote .btc-reply-target');
             return t ? t.style.color : '';
         })(),
+        // Le pseudo d'une notice doit être sur la même ligne que le texte qui suit.
+        // On compare les centres verticaux plutôt que les hauteurs : un simple
+        // display:inline mal appliqué laisserait le pseudo au-dessus.
+        noticeNomEnLigne: (() => {
+            const notice = document.querySelector('.btc-notice-line');
+            if (!notice) return null;
+            const nom = notice.querySelector('.chatter-name');
+            const para = nom && nom.closest('p');
+            if (!nom || !para) return null;
+            // premier nœud de texte utile après le pseudo, dans le même paragraphe
+            const walker = document.createTreeWalker(para, NodeFilter.SHOW_TEXT);
+            let apres = null, n, vuNom = false;
+            while ((n = walker.nextNode())) {
+                if (!vuNom) { if (nom.contains(n)) vuNom = true; continue; }
+                if (n.textContent.trim()) { apres = n; break; }
+            }
+            if (!apres) return null;
+            const range = document.createRange();
+            range.selectNodeContents(apres);
+            const rt = range.getClientRects()[0];
+            const rn = nom.getBoundingClientRect();
+            if (!rt) return null;
+            return Math.round(Math.abs((rn.top + rn.height / 2) - (rt.top + rt.height / 2)));
+        })(),
+        // Gift multiple : le donateur doit être sur la ligne du texte, pas au-dessus.
+        giftDonorEnLigne: (() => {
+            const nom = document.querySelector('.btc-notice-line .mystery-gift-theme__displayname');
+            if (!nom) return null;
+            const suivant = nom.nextElementSibling;
+            if (!suivant) return null;
+            // Première ligne du texte seulement : sa boîte entière couvre plusieurs
+            // lignes et son centre serait bien plus bas que celui du pseudo.
+            const rs = suivant.getClientRects()[0];
+            const rn = nom.getClientRects()[0];
+            if (!rs || !rn) return null;
+            return Math.round(Math.abs((rn.top + rn.height / 2) - (rs.top + rs.height / 2)));
+        })(),
         // Écart entre le bas de la citation et le haut du message : à 1 px la citation
         // paraissait collée au message.
         gapCitationMessage: [...document.querySelectorAll('.chat-line__message.btc-reply')]
@@ -216,7 +261,9 @@ const r = await page.evaluate(() => {
 // --- 1. fond plus clair sur les messages qui répondent ---
 check('réponses détectées', r.replyLines, 3);
 check('citation sans cadre détaché (style rail)', r.slotHasOwnBox, false);
-check('espace entre citation et message', r.gapCitationMessage, (v) => v.length >= 2 && v.every(g => g >= 4));
+check('espace entre citation et message', r.gapCitationMessage, (v) => v.length >= 2 && v.every(g => g >= 9));
+check('pseudo de notice sur la ligne du texte', r.noticeNomEnLigne, (v) => v !== null && v <= 3);
+check('donateur du gift multiple sur la ligne du texte', r.giftDonorEnLigne, (v) => v !== null && v <= 3);
 
 // --- 2. réponse visible en entier, plus petite, grise, avec emotes ---
 check('citation non tronquée (white-space)', r.whiteSpace, 'normal');
