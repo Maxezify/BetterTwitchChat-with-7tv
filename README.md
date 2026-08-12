@@ -47,6 +47,7 @@ reply.renderEmotes    // reconstruit les emotes dans la citation
 reply.colorQuotedName // recolore le « @pseudo » cité (désactivé par défaut)
 
 compact.enabled        // compactage des notices sub/prime/gift
+compact.textIndent     // espace entre la barre de couleur et le contenu
 compact.aggregateGifts // regroupement des gifts multiples
 compact.giftWindowMs   // délai d'attente des gifts individuels
 
@@ -125,7 +126,7 @@ styled-components changeant à chaque build de Twitch.
 
 - [`tools/7tv-dom-recorder.user.js`](tools/7tv-dom-recorder.user.js) — capture la
   structure réelle du chat pour diagnostiquer une future casse.
-- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 62 vérifications du script contre du
+- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 67 vérifications du script contre du
   DOM Twitch réellement capturé, exécutées dans Chromium.
 
 Voir [`tools/README.md`](tools/README.md).

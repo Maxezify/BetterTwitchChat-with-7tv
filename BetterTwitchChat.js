@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.7.0
+// @version      15.7.1
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -45,7 +45,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.7.0';
+    const VERSION = '15.7.1';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -96,6 +96,8 @@
             fontSize: '12.5px',
             lineHeight: '1.35',
             iconSize: '15px',
+            // Espace entre la barre de couleur et le texte de la notice.
+            textIndent: '8px',
             // Regroupe « X offre N abonnements » + les N « X a offert un abonnement à Y »
             // en une seule notice avec la liste des destinataires.
             aggregateGifts: true,
@@ -343,8 +345,10 @@
 
         /* ---------- 3. Notices sub / prime / gift compactées ---------- */
         ${c.enabled ? `
+        /* Aucune marge à gauche de la carte : c'est elle qui décollait la barre de
+           couleur du bord. L'espace avant le texte est repris sur la ligne de notice. */
         ${NC} {
-            padding: 3px 8px !important;
+            padding: 3px 8px 3px 0 !important;
             margin: 1px 0 !important;
         }
         ${NC} .btc-notice-bar {
@@ -354,7 +358,7 @@
         ${NL} {
             font-size: ${c.fontSize} !important;
             line-height: ${c.lineHeight} !important;
-            padding: 0 !important;
+            padding: 0 0 0 ${c.textIndent} !important;
         }
         ${NL} p,
         ${NL} span:not(.btc-gift-recipient) {
@@ -389,6 +393,28 @@
             font-size: ${c.fontSize} !important;
             margin: 0 !important;
         }
+        /* Bord gauche irrégulier : l'icône vivait dans le flux du texte, si bien que la
+           première ligne démarrait après elle et les suivantes revenaient sous elle. La
+           rangée devient une colonne d'icône plus un bloc de texte, ce qui aligne toutes
+           les lignes. Les trois rôles sont étiquetés en JS : la profondeur du porte-icône
+           varie d'un type de notice à l'autre, un sélecteur CSS unique se tromperait de
+           cible — il l'a fait. */
+        ${NL} .btc-notice-row {
+            display: flex !important;
+            align-items: flex-start !important;
+            gap: 6px !important;
+        }
+        ${NL} .btc-notice-icon {
+            flex: 0 0 auto !important;
+            height: calc(${c.lineHeight} * 1em) !important;
+            display: flex !important;
+            align-items: center !important;
+        }
+        ${NL} .btc-notice-text {
+            flex: 1 1 auto !important;
+            min-width: 0 !important;
+        }
+
         /* Twitch enveloppe le pseudo dans des conteneurs rendus en bloc, ce qui le
            pousse sur sa propre ligne au-dessus du texte de la notice. On les remet en
            ligne pour que la notice tienne en un seul paragraphe. Le conteneur
@@ -765,6 +791,31 @@
         }
     };
 
+    /**
+     * Étiquette la rangée « icône + texte » d'une notice. La profondeur du porte-icône
+     * change selon le type — un abonnement l'enveloppe d'un div de plus qu'un watch
+     * streak — donc on remonte depuis l'icône jusqu'au premier ancêtre qui a un second
+     * enfant : c'est la rangée, et l'enfant qu'on vient de quitter est la colonne.
+     */
+    const layoutNoticeRow = (noticeLine) => {
+        const icon = noticeLine.querySelector('.tw-svg');
+        if (!icon) return;
+
+        let colonne = icon;
+        let rangee = icon.parentElement;
+        while (rangee && rangee !== noticeLine && rangee.childElementCount < 2) {
+            colonne = rangee;
+            rangee = rangee.parentElement;
+        }
+        if (!rangee || rangee.childElementCount < 2) return;
+
+        rangee.classList.add('btc-notice-row');
+        colonne.classList.add('btc-notice-icon');
+        for (const enfant of rangee.children) {
+            if (enfant !== colonne) enfant.classList.add('btc-notice-text');
+        }
+    };
+
     const compactNotice = (noticeLine) => {
         if (!CONFIG.compact.enabled) return;
         noticeLine.classList.add('btc-notice-line');
@@ -777,6 +828,7 @@
         if (card.childElementCount > 3) return;
 
         card.classList.add('btc-notice-card');
+        layoutNoticeRow(noticeLine);
         // La barre de couleur est le frère précédent : un div vide avec un
         // background inline.
         const bar = noticeLine.previousElementSibling;

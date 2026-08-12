@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-62 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+67 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -59,6 +59,12 @@ Autres constats utiles :
   variables inline sur `.chat-line__message` :
   `--seventv-chat-custom-highlight-color`, `-border-color`, `-bg`, plus un attribut
   `data-seventv-custom-highlight-label`. Le script lit ces variables en priorité.
+- Dans une notice, le porte-icône et le bloc de texte vivent dans un même flux en
+  ligne : la première ligne démarre après l'icône, les suivantes reviennent sous elle.
+  La profondeur du porte-icône varie selon le type de notice (un abonnement l'enveloppe
+  d'un div de plus qu'un watch streak), donc les rôles sont étiquetés en JS en remontant
+  depuis l'icône jusqu'au premier ancêtre à deux enfants — un sélecteur CSS unique se
+  trompait de cible.
 - Dans les notices, Twitch enveloppe le pseudo dans des conteneurs rendus en bloc
   (`span > .chatter-name`), ce qui le pousse sur sa propre ligne au-dessus du texte.
   Le bloc texte du gift multiple est en plus une colonne flex. Les deux sont remis en

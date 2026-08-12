@@ -79,6 +79,23 @@ const FIXTURE = `<!doctype html><meta charset="utf-8"><title>fixture</title>
      que nos règles l'emportent, comme pour la taille de la citation. */
   [data-test-selector="user-notice-line"] p > span:first-child { display: block !important; }
   [data-test-selector="user-notice-line"] .chatter-name { display: block !important; }
+  /* Carte de notice telle que Twitch la construit : barre de couleur à gauche,
+     contenu à droite, le tout en flex. C'est ce qui rend mesurables le collage de la
+     barre au bord et l'écart entre la barre et le texte. */
+  /* La notice système 7TV est un enfant direct de la racine du chat : sans cette
+     exclusion, la règle transformerait la racine en conteneur flex et alignerait tous
+     les messages côte à côte. */
+  div:has(> [data-test-selector="user-notice-line"]):not([data-test-selector]) {
+    display: flex; background: #26262c; }
+  div:has(> [data-test-selector="user-notice-line"]):not([data-test-selector]) > div:first-child {
+    width: 4px; align-self: stretch; background: rgb(250,41,41); }
+  [data-test-selector="user-notice-line"] { flex: 1 1 auto; min-width: 0; }
+  /* Porte-icône et bloc de texte sont dans un même flux en ligne : la première ligne
+     démarre après l'icône, les suivantes reviennent sous elle. C'est le bord gauche
+     irrégulier signalé sur une notice réelle. */
+  [data-test-selector="user-notice-line"] div:has(> .tw-svg) { display: inline; }
+  [data-test-selector="user-notice-line"] div:has(> p) { display: inline; }
+  [data-test-selector="user-notice-line"] .tw-svg { display: inline-block; vertical-align: middle; }
   /* Le bloc texte du gift multiple est une colonne : pseudo au-dessus du message. */
   [data-test-selector="user-notice-line"] div:has(> .mystery-gift-theme__displayname) {
     display: flex !important; flex-direction: column !important; }
@@ -92,7 +109,11 @@ ${LINES.plain}
     replyWithEmote,
     replyMod: LINES.replyMod,
     highlightedReply,
-    subPrime: LINES.subPrime,
+    // Formulation réelle d'un abonnement de longue date : le texte occupe deux lignes,
+    // seule façon de vérifier que leur bord gauche est aligné.
+    subPrime: LINES.subPrime.replace(
+        '5e mois d\u2019abonnement',
+        '60e mois d\u2019abonnement, dont 60 mois cons\u00e9cutifs'),
     resub: LINES.resub,
     giftMass: withInlineImage(LINES.giftMass),
     giftSingles: LINES.giftSingles,
@@ -206,6 +227,38 @@ const r = await page.evaluate(() => {
             if (!rt) return null;
             return Math.round(Math.abs((rn.top + rn.height / 2) - (rt.top + rt.height / 2)));
         })(),
+        // Les trois défauts signalés sur une notice réelle : barre décollée du bord,
+        // texte collé à la barre, bord gauche du texte irrégulier d'une ligne à l'autre.
+        noticeGeometrie: (() => {
+            const ligne = document.querySelector('.btc-notice-line');
+            const carte = ligne && ligne.closest('.btc-notice-card');
+            const barre = carte && carte.querySelector('.btc-notice-bar');
+            const para = ligne && ligne.querySelector('p');
+            if (!ligne || !carte || !barre || !para) return null;
+            const rc = carte.getBoundingClientRect(), rb = barre.getBoundingClientRect();
+            // getClientRects() sur un bloc ne rend qu'une boîte : il faut un Range sur
+            // son contenu pour obtenir une boîte par ligne de texte.
+            const portee = document.createRange();
+            portee.selectNodeContents(para);
+            const lignesTexte = [...portee.getClientRects()].filter(r => r.width > 1);
+            return {
+                barreAuBord: Math.round(rb.left - rc.left),
+                ecartBarreContenu: Math.round(
+                    (ligne.firstElementChild || ligne).getBoundingClientRect().left - rb.right),
+                nbLignes: lignesTexte.length,
+                desalignement: lignesTexte.length >= 2
+                    ? Math.round(Math.abs(lignesTexte[0].left - lignesTexte[1].left)) : 0,
+                // Le vrai symptôme : l'icône dans le flux du texte fait démarrer la 1re
+                // ligne après elle, les suivantes revenant sous elle. Le texte doit donc
+                // occuper sa propre colonne, entièrement à droite de l'icône.
+                texteApresIcone: (() => {
+                    const icone = ligne.querySelector('.tw-svg');
+                    if (!icone) return null;
+                    return Math.round(para.getBoundingClientRect().left
+                        - icone.getBoundingClientRect().right);
+                })()
+            };
+        })(),
         // Gift multiple : le donateur doit être sur la ligne du texte, pas au-dessus.
         giftDonorEnLigne: (() => {
             const nom = document.querySelector('.btc-notice-line .mystery-gift-theme__displayname');
@@ -253,6 +306,18 @@ const r = await page.evaluate(() => {
         giftHidden: qa('.btc-hidden').length,
         giftExpected: (() => { const e = [...window.__BTC.gifts.pending.values()][0]; return e ? e.expected : null; })(),
         sysNoticeText: (q('.seventv-system-notice') || {}).textContent || '',
+        coupables: (() => {
+            const large = document.documentElement.clientWidth;
+            return [...document.querySelectorAll('*')]
+                .filter(el => el.getBoundingClientRect().right > large + 1)
+                .slice(0, 6)
+                .map(el => ({
+                    tag: el.tagName,
+                    cls: (el.getAttribute('class') || '').split(' ').filter(c => !/-sc-/.test(c)).join(' '),
+                    right: Math.round(el.getBoundingClientRect().right),
+                    w: Math.round(el.getBoundingClientRect().width)
+                }));
+        })(),
         rootPolluted: q('[data-test-selector="chat-scrollable-area__message-container"]').classList.contains('btc-notice-card'),
         horizontalScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth
     };
@@ -264,6 +329,11 @@ check('citation sans cadre détaché (style rail)', r.slotHasOwnBox, false);
 check('espace entre citation et message', r.gapCitationMessage, (v) => v.length >= 2 && v.every(g => g >= 9));
 check('pseudo de notice sur la ligne du texte', r.noticeNomEnLigne, (v) => v !== null && v <= 3);
 check('donateur du gift multiple sur la ligne du texte', r.giftDonorEnLigne, (v) => v !== null && v <= 3);
+check('barre de couleur collée au bord gauche', r.noticeGeometrie, (g) => g && g.barreAuBord === 0);
+check('contenu décollé de la barre', r.noticeGeometrie, (g) => g && g.ecartBarreContenu >= 6);
+check('notice sur plusieurs lignes (cas mesurable)', r.noticeGeometrie, (g) => g && g.nbLignes >= 2);
+check('bord gauche du texte régulier', r.noticeGeometrie, (g) => g && g.desalignement <= 1);
+check('texte en colonne à droite de l\'icône', r.noticeGeometrie, (g) => g && g.texteApresIcone >= 0);
 
 // --- 2. réponse visible en entier, plus petite, grise, avec emotes ---
 check('citation non tronquée (white-space)', r.whiteSpace, 'normal');
@@ -470,6 +540,9 @@ check('gifts en attente purgés à la navigation', afterNav.pendingGifts, 0);
 await browser.close();
 
 // ---------------------------------------------------------------------------
+if (r.coupables.length) {
+    console.log('éléments qui débordent :', JSON.stringify(r.coupables, null, 1));
+}
 let failed = 0;
 for (const c of checks) {
     if (!c.ok) failed++;
