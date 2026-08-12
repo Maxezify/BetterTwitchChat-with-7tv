@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.8.1
+// @version      15.9.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -45,7 +45,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.8.1';
+    const VERSION = '15.9.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -88,8 +88,9 @@
             // Volontairement calé sous l'interligne : une emote plus haute ferait
             // grandir la première ligne et désalignerait la bulle.
             emoteHeight: '1.3em',
-            // Épaisseur de la barre de couleur reprise du grade 7TV.
-            accentWidth: '4px',
+            // Épaisseur du filet de grade. Calée sur celle de 7TV (2 px) pour que les
+            // deux barres aient la même allure quand elles se superposent.
+            accentWidth: '2px',
             accentFallback: 'hsla(0, 0%, 100%, 0.4)'
         },
 
@@ -111,8 +112,9 @@
         },
 
         // --- Divers ---
-        // Trait de séparation entre les messages.
-        separators: true,
+        // Trait de séparation entre les messages. Désactivé : 7TV en pose déjà un
+        // (classe seventv-chat-lines-separator-twitch sur <html>), le nôtre doublait.
+        separators: false,
         // Traduit en français les notices que Twitch laisse en anglais et les notices
         // système de 7TV (celles-ci sont toujours en anglais). Sans effet si ton
         // interface Twitch est déjà en français.

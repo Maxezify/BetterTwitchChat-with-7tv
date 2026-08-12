@@ -52,7 +52,7 @@ compact.textIndent     // espace entre la barre de couleur et le contenu
 compact.aggregateGifts // regroupement des gifts multiples
 compact.giftWindowMs   // délai d'attente des gifts individuels
 
-separators   // trait de séparation entre les messages
+separators   // trait de séparation entre les messages (désactivé : 7TV en pose un)
 translate    // traduit les notices restées en anglais
 debug        // journalise les détections dans la console
 ```
@@ -88,7 +88,7 @@ dans l'`aria-label` de la ligne, et nous n'avons pas su y trouver la citation.
 
 | Valeur | Rendu |
 |---|---|
-| `rail` *(défaut retenu)* | La citation fait corps avec le message : aucun cadre, aucun fond propre. Un filet vertical de 4 px court le long de l'ensemble, dans la couleur de grade 7TV quand il y en a une, en gris neutre sinon — donc toutes les réponses sont marquées. |
+| `rail` *(défaut retenu)* | La citation fait corps avec le message : aucun cadre, aucun fond propre. Un filet vertical de 2 px — la même épaisseur que celui de 7TV — court le long de l'ensemble, dans la couleur de grade 7TV quand il y en a une, en gris neutre sinon — donc toutes les réponses sont marquées. |
 | `inline` | Identique, mais sans filet neutre : seule la couleur posée par 7TV apparaît. Les réponses de gens sans grade ne se distinguent que par leur fond éclairci. Équivaut à `rail` avec `accentFallback: 'transparent'`. |
 | `card` | La citation est un bloc détaché avec son propre fond et sa bordure. |
 
@@ -127,7 +127,7 @@ styled-components changeant à chaque build de Twitch.
 
 - [`tools/7tv-dom-recorder.user.js`](tools/7tv-dom-recorder.user.js) — capture la
   structure réelle du chat pour diagnostiquer une future casse.
-- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 70 vérifications du script contre du
+- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 72 vérifications du script contre du
   DOM Twitch réellement capturé, exécutées dans Chromium.
 
 Voir [`tools/README.md`](tools/README.md).

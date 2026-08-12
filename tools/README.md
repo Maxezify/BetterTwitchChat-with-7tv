@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-70 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+72 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -85,6 +85,10 @@ Autres constats utiles :
   `font-size: var(--seventv-twitch-chat-font-size)` sur `[data-a-target="chat-line-message"]`,
   donc sur la ligne et non sur la citation. Laissé à sa valeur par défaut, il n'ajoute
   ni la classe ni la variable et n'a aucun effet.
+- 7TV trace déjà ses propres séparateurs entre messages
+  (`seventv-chat-lines-separator-twitch`) : en ajouter doublait le trait.
+- Sa bordure de highlight fait 2 px. Un filet plus épais posé par-dessus donne un trait
+  d'apparence double.
 - Les réglages actifs sont lisibles dans la liste de classes de `<html>`
   (`seventv-chat-message-style-full-width`, `seventv-chat-mention-highlight-enabled`…).
 - 7TV applique aux emotes un `style` inline `width/max-width/max-height` en `!important`.

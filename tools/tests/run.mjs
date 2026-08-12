@@ -284,6 +284,22 @@ const r = await page.evaluate(() => {
                     + parseFloat(getComputedStyle(line).paddingTop);
                 return Math.round(quote.getBoundingClientRect().top - hautContenu);
             }).filter(v => v !== null),
+        // Le filet doit avoir la même épaisseur que la bordure posée par 7TV, sinon les
+        // deux barres superposées donnent un trait deux fois trop épais.
+        largeurFiletVsSeptTV: (() => {
+            const hl = document.querySelector('.seventv-chat-message-custom-highlight');
+            if (!hl) return null;
+            const cs = getComputedStyle(hl);
+            const filet = (cs.boxShadow.match(/(\d+(?:\.\d+)?)px\s+0px\s+0px\s+0px\s+inset/)
+                || cs.boxShadow.match(/inset\s+(\d+(?:\.\d+)?)px/) || [])[1];
+            return { filet: filet ? Math.round(parseFloat(filet)) : null,
+                     bordure7tv: Math.round(parseFloat(cs.borderLeftWidth)) };
+        })(),
+        separateurAjoute: (() => {
+            const line = document.querySelector('.chat-line__message.btc-reply');
+            if (!line) return null;
+            return parseFloat(getComputedStyle(line).borderBottomWidth) > 0;
+        })(),
         pseudosSoulignes: (() => {
             const cibles = [...document.querySelectorAll('.btc-reply-quote .btc-reply-target')];
             const mentions = [...document.querySelectorAll('.btc-reply-quote .btc-reply-mention')];
@@ -352,6 +368,9 @@ check('espace au-dessus de la citation', r.espaceAuDessus, (v) => v.length >= 2 
 check('espaces haut et bas symétriques', r.espaceAuDessus,
     (v) => v.every((haut, i) => Math.abs(haut - r.gapCitationMessage[i]) <= 1));
 check('pseudos cités soulignés', r.pseudosSoulignes, true);
+check('filet de la même épaisseur que celui de 7TV', r.largeurFiletVsSeptTV,
+    (v) => v && v.filet !== null && v.filet === v.bordure7tv);
+check('aucun séparateur ajouté', r.separateurAjoute, false);
 check('pseudo de notice sur la ligne du texte', r.noticeNomEnLigne, (v) => v !== null && v <= 3);
 check('donateur du gift multiple sur la ligne du texte', r.giftDonorEnLigne, (v) => v !== null && v <= 3);
 check('barre de couleur collée au bord gauche', r.noticeGeometrie, (g) => g && g.barreAuBord === 0);
@@ -541,7 +560,7 @@ const colorOptIn = await page.evaluate(async () => {
 });
 check('recoloration du pseudo cité disponible en option', colorOptIn, (v) => !!v && v !== 'inherit');
 
-check('card : la citation retrouve sa bordure', styleProbe.card.slotBorder, 4);
+check('card : la citation retrouve sa bordure', styleProbe.card.slotBorder, (v) => v > 0);
 check('card : la citation retrouve son fond', styleProbe.card.slotBg, (v) => v !== 'none');
 check('inline : aucun filet sur la ligne', styleProbe.inline.lineShadow, 'none');
 check('inline : aucun cadre sur la citation', styleProbe.inline.slotBorder, 0);
