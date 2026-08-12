@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.7.1
+// @version      15.8.1
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -45,7 +45,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.7.1';
+    const VERSION = '15.8.1';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -79,6 +79,9 @@
             showIcon: true,
             // Reconstruit les emotes dans la citation (Twitch n'y met que du texte brut).
             renderEmotes: true,
+            // Souligne les pseudos cités : celui de la personne à qui l'on répond et
+            // les mentions présentes dans le texte cité.
+            underlineNames: true,
             // Recolore le « @pseudo » cité avec sa vraie couleur de chat. Désactivé :
             // la couleur attire trop l'œil sur une citation censée rester discrète.
             colorQuotedName: false,
@@ -221,7 +224,10 @@
         .btc-reply-slot.btc-reply-slot {
             background: none !important;
             border: 0 !important;
-            padding: 0 !important;
+            /* L'espace au-dessus est un padding, pas une marge : une marge haute
+               s'effondrerait à travers les conteneurs sans bordure ni remplissage et
+               s'appliquerait hors du fond du message au lieu d'aérer la citation. */
+            padding: ${r.gap} 0 0 0 !important;
             margin: 0 0 ${r.gap} 0 !important;
         }`,
 
@@ -229,7 +235,7 @@
         .btc-reply-slot.btc-reply-slot {
             background: none !important;
             border: 0 !important;
-            padding: 0 !important;
+            padding: ${r.gap} 0 0 0 !important;
             margin: 0 0 ${r.gap} 0 !important;
         }`,
 
@@ -238,8 +244,8 @@
             background-image: linear-gradient(var(--btc-reply-block-tint), var(--btc-reply-block-tint));
             border-left: ${r.accentWidth} solid var(--btc-reply-accent);
             border-radius: 2px;
-            padding: 2px 6px !important;
-            margin: 1px 0 ${r.gap} 0 !important;
+            padding: calc(${r.gap} / 2) 6px !important;
+            margin: ${r.gap} 0 ${r.gap} 0 !important;
         }`
     });
 
@@ -335,6 +341,12 @@
         ${Q} .btc-reply-target {
             font-weight: 600 !important;
         }
+        ${r.underlineNames ? `
+        ${Q} .btc-reply-mention,
+        ${Q} .btc-reply-target {
+            text-decoration: underline !important;
+            text-underline-offset: 2px !important;
+        }` : ''}
         ${S} svg {
             width: calc(var(--btc-reply-font-scale, ${r.fontScale}) * 1.15em) !important;
             height: calc(var(--btc-reply-font-scale, ${r.fontScale}) * 1.15em) !important;
@@ -560,15 +572,21 @@
 
     /** Recolore le « @pseudo » de la citation avec la couleur de chat de la personne. */
     const colorQuotedName = (quote, line) => {
-        if (!CONFIG.reply.colorQuotedName) return;
         const span = quote.querySelector(':scope > span');
         if (!span) return;
+
+        // L'étiquetage est inconditionnel : il sert aussi au soulignement, qui n'a rien
+        // à voir avec la recoloration. Les lier faisait dépendre le soulignement de la
+        // cible d'une option sans rapport, et seules les mentions du texte étaient
+        // soulignées.
+        span.classList.add('btc-reply-target');
+        if (!CONFIG.reply.colorQuotedName) return;
+
         // 7TV expose le login exact de la personne citée sur la ligne. On le préfère au
         // texte affiché, qui peut être un nom international ou une casse différente.
         const login = (line && line.dataset.seventvReplyParentLogin
             || span.textContent.trim().replace(/^@/, '')).toLowerCase();
         if (!login) return;
-        span.classList.add('btc-reply-target');
         const color = nameColors.get(login);
         if (color) span.style.color = color;
     };

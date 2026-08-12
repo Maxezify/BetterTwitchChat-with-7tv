@@ -9,7 +9,7 @@ Userscript Tampermonkey qui rend le chat de Twitch plus lisible, compatible avec
 |---|---|
 | **Réponses mises en valeur** | Le message qui répond à quelqu'un reçoit un fond légèrement plus clair. La citation fait corps avec le message, sans cadre détaché. |
 | **Citation lisible en entier** | Twitch tronque la citation à une seule ligne avec des points de suspension. Elle est désormais affichée intégralement. |
-| **Citation discrète** | Police à 78 % du texte du chat, gris uni, bulle calée sur la première ligne. Le « @pseudo » cité peut reprendre sa couleur de chat (`reply.colorQuotedName`), désactivé par défaut car trop voyant. |
+| **Citation discrète** | Police à 78 % du texte du chat, gris uni, pseudos soulignés, bulle calée sur la première ligne. Le « @pseudo » cité peut reprendre sa couleur de chat (`reply.colorQuotedName`), désactivé par défaut car trop voyant. |
 | **Emotes dans les citations** | Twitch ne met que du texte brut dans la citation. Le script indexe les emotes (7TV et Twitch) qui passent dans le chat et les réaffiche dans les réponses. |
 | **Notices compactées** | Subs, Primes, resubs, gifts et raids passent en police réduite avec des marges serrées. Le pseudo, que Twitch place sur sa propre ligne, rejoint le texte pour tenir en un seul paragraphe. L'illustration « cadeau mystère » de 96 px devient une vignette de 26 px. |
 | **Gifts multiples regroupés** | « X offre 50 abonnements » absorbe les « X a offert un abonnement à Y » qui suivent et affiche la liste des destinataires sur une seule notice. |
@@ -40,10 +40,11 @@ reply.blockTint       // fond du bloc de citation (style 'card' uniquement)
 reply.color           // couleur du texte cité
 reply.fontScale       // taille de la citation (0.78 = 78 % du texte normal)
 reply.lineHeight      // interligne de la citation, sert aussi à caler la bulle
-reply.gap             // espace entre la citation et le message
+reply.gap             // espace au-dessus et en dessous de la citation
 reply.hidePrefix      // retire « Répond à », garde « @pseudo : texte »
 reply.showIcon        // garde la bulle SVG à gauche de la citation
 reply.renderEmotes    // reconstruit les emotes dans la citation
+reply.underlineNames  // souligne les pseudos cités
 reply.colorQuotedName // recolore le « @pseudo » cité (désactivé par défaut)
 
 compact.enabled        // compactage des notices sub/prime/gift
@@ -126,7 +127,7 @@ styled-components changeant à chaque build de Twitch.
 
 - [`tools/7tv-dom-recorder.user.js`](tools/7tv-dom-recorder.user.js) — capture la
   structure réelle du chat pour diagnostiquer une future casse.
-- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 67 vérifications du script contre du
+- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 70 vérifications du script contre du
   DOM Twitch réellement capturé, exécutées dans Chromium.
 
 Voir [`tools/README.md`](tools/README.md).

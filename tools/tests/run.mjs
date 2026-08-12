@@ -272,6 +272,27 @@ const r = await page.evaluate(() => {
             if (!rs || !rn) return null;
             return Math.round(Math.abs((rn.top + rn.height / 2) - (rs.top + rs.height / 2)));
         })(),
+        // Espace au-dessus de la citation, mesuré depuis le haut de la zone de contenu
+        // de la ligne. Posé en padding : une marge s'effondrerait hors du fond du
+        // message et l'espace n'apparaîtrait pas là où on l'attend.
+        espaceAuDessus: [...document.querySelectorAll('.chat-line__message.btc-reply')]
+            .map((line) => {
+                const slot = line.querySelector('.btc-reply-slot');
+                const quote = slot && slot.querySelector('.btc-reply-quote');
+                if (!quote) return null;
+                const hautContenu = line.getBoundingClientRect().top
+                    + parseFloat(getComputedStyle(line).paddingTop);
+                return Math.round(quote.getBoundingClientRect().top - hautContenu);
+            }).filter(v => v !== null),
+        pseudosSoulignes: (() => {
+            const cibles = [...document.querySelectorAll('.btc-reply-quote .btc-reply-target')];
+            const mentions = [...document.querySelectorAll('.btc-reply-quote .btc-reply-mention')];
+            // Exiger la présence des deux : sans ça, l'assertion passait alors que la
+            // cible de la réponse n'était même pas étiquetée, donc jamais soulignée.
+            if (!cibles.length || !mentions.length) return null;
+            return [...cibles, ...mentions]
+                .every(el => /underline/.test(getComputedStyle(el).textDecorationLine));
+        })(),
         // Écart entre le bas de la citation et le haut du message : à 1 px la citation
         // paraissait collée au message.
         gapCitationMessage: [...document.querySelectorAll('.chat-line__message.btc-reply')]
@@ -327,6 +348,10 @@ const r = await page.evaluate(() => {
 check('réponses détectées', r.replyLines, 3);
 check('citation sans cadre détaché (style rail)', r.slotHasOwnBox, false);
 check('espace entre citation et message', r.gapCitationMessage, (v) => v.length >= 2 && v.every(g => g >= 9));
+check('espace au-dessus de la citation', r.espaceAuDessus, (v) => v.length >= 2 && v.every(g => g >= 9));
+check('espaces haut et bas symétriques', r.espaceAuDessus,
+    (v) => v.every((haut, i) => Math.abs(haut - r.gapCitationMessage[i]) <= 1));
+check('pseudos cités soulignés', r.pseudosSoulignes, true);
 check('pseudo de notice sur la ligne du texte', r.noticeNomEnLigne, (v) => v !== null && v <= 3);
 check('donateur du gift multiple sur la ligne du texte', r.giftDonorEnLigne, (v) => v !== null && v <= 3);
 check('barre de couleur collée au bord gauche', r.noticeGeometrie, (g) => g && g.barreAuBord === 0);
