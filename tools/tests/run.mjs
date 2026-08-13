@@ -63,6 +63,10 @@ const highlightedReply = LINES.replyMod
 
 const FIXTURE = `<!doctype html><meta charset="utf-8"><title>fixture</title>
 <style>
+  /* Variables de thème Twitch relevées dans la capture. Sans elles, la barre d'une
+     série de visionnage — dont la couleur est déclarée var(--color-border-quote) — est
+     invalide, donc transparente, et la notice ne ressemble plus à ce qui s'affiche. */
+  :root { --color-border-quote: #adadb8; }
   body { background:#0e0e10; color:#efeff1; font:14px/1.5 Inter,Arial,sans-serif; margin:0; }
   /* Reproduit la troncature Twitch de la citation, que le script doit annuler. */
   .chat-line__message-container > div:first-child p {
@@ -318,6 +322,28 @@ const r = await page.evaluate(() => {
                 && !String(x.className).includes('btc-')
                 && !x.closest('.btc-gift-recipients'))
             .map(x => getComputedStyle(x).fontSize)),
+        // Le message d'abonnement vit hors de la rangée icône + texte : il démarrait au
+        // bord de la notice, sous l'icône, au lieu de s'aligner sur la phrase.
+        alignementMessage: (() => {
+            const el = q('.btc-notice-line [data-a-target="chat-resubscription-message__custom-message"]');
+            const texte = el && el.closest('.btc-notice-line').querySelector('.btc-notice-text');
+            if (!el || !texte) return null;
+            return Math.round(el.getBoundingClientRect().left - texte.getBoundingClientRect().left);
+        })(),
+        // Teinte de fond reprise de la barre de la notice, où Twitch pose la couleur
+        // d'accent de la chaîne en style inline.
+        fondNoticeAbonnement: (() => {
+            const n = qa('.btc-notice-line').find(x => /abonné\(e\)/i.test(x.textContent));
+            const carte = n && n.closest('.btc-notice-card');
+            return carte ? getComputedStyle(carte).backgroundImage : '';
+        })(),
+        // Une série de visionnage n'a pas la couleur de la chaîne sur sa barre : elle
+        // retombe sur un gris de thème. Elle doit malgré tout reprendre cette couleur.
+        teinteWatchStreak: (() => {
+            const n = qa('.btc-notice-line').find(x => /visionnage/i.test(x.textContent));
+            const carte = n && n.closest('.btc-notice-card');
+            return carte ? carte.style.getPropertyValue('--btc-notice-tint') : '';
+        })(),
         etiquettesHighlight: qa('[data-seventv-custom-highlight-label]').length,
         // 7TV réserve 1.3rem au-dessus pour son étiquette, 0.75rem en dessous.
         espacesHighlight: hl
@@ -592,6 +618,12 @@ check('chaque fragment de notice à la taille du texte cité',
     r.taillesNotices, (v) => v.length >= 10 && v.every(t => t === r.fontSize));
 check('icône de notice centrée sur la hauteur du bloc',
     r.watchStreak, (v) => v && Math.abs(v.decalageIcone) <= 1);
+check('message d\'abonnement aligné sur le texte de la notice',
+    r.alignementMessage, (v) => v !== null && Math.abs(v) <= 1);
+check('notice teintée de la couleur de sa barre',
+    r.fondNoticeAbonnement, (v) => /rgba\(250,\s*41,\s*41,\s*0\.15\)/.test(v));
+check('série de visionnage teintée de la couleur de la chaîne malgré sa barre neutre',
+    r.teinteWatchStreak, 'rgba(250, 41, 41, 0.15)');
 check('message de resub : le pseudo garde sa couleur',
     r.resubPseudoColor, (v) => v && v !== r.color);
 check('message de resub sans le remplissage d\'une ligne de chat',
@@ -897,6 +929,31 @@ const afterNav = await page.evaluate(() => ({
 }));
 check('traitement actif après navigation SPA', afterNav.replies, (v) => v >= 1);
 check('gifts en attente purgés à la navigation', afterNav.pendingGifts, 0);
+
+// Rien ne garantit qu'une notice d'abonnement arrive avant une série de visionnage : la
+// couleur de la chaîne peut n'être connue qu'ensuite. La notice déjà posée doit alors
+// être reteintée. La navigation vient de remettre l'accent à zéro, on est donc dans les
+// conditions exactes d'un début de session.
+const derniereTeinte = () => page.evaluate(() => {
+    const cartes = [...document.querySelectorAll('#avant-abonnement .btc-notice-card')];
+    return cartes.length ? cartes[0].style.getPropertyValue('--btc-notice-tint') : null;
+});
+await page.evaluate((html) => {
+    const root = document.querySelector('[data-test-selector="chat-scrollable-area__message-container"]');
+    const holder = document.createElement('div');
+    holder.id = 'avant-abonnement';
+    holder.innerHTML = html;
+    root.appendChild(holder);
+}, LINES.watchStreak);
+await page.waitForTimeout(200);
+const teinteAvant = await derniereTeinte();
+await addLines(['subPrime']);
+await page.waitForTimeout(200);
+const teinteApres = await derniereTeinte();
+check('série de visionnage d\'abord teintée d\'un gris faute de couleur de chaîne',
+    teinteAvant, (v) => !!v && v !== 'rgba(250, 41, 41, 0.15)');
+check('série de visionnage reteintée dès que la couleur de chaîne se présente',
+    teinteApres, 'rgba(250, 41, 41, 0.15)');
 
 // --- 6. le nouveau message reste entièrement visible ---
 // Nos transformations agrandissent la ligne — citation déroulée, espaces ajoutés — dans

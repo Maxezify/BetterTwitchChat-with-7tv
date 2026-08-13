@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-107 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+112 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -112,6 +112,20 @@ Autres constats utiles :
   au lieu de recalculer. Attention en banc d'essai : une règle concurrente déclarée en
   tête de document nous laisse gagner à spécificité égale — c'est l'injection **tardive**
   de styled-components qui fait perdre, et elle seule rend le test probant.
+- La barre latérale d'une notice porte la **couleur d'accent de la chaîne**, posée par
+  Twitch en style **inline** : `background: rgb(250, 41, 41)` dans la capture, là où le
+  violet Twitch par défaut est `#9147ff`. C'est la seule source de cette couleur dans le
+  DOM du chat — aucune variable `:root` ne l'expose. Mais toutes les notices n'en portent
+  pas : une **série de visionnage** déclare `var(--color-border-quote)`, un gris de thème
+  (`#adadb8`). Pour teindre celles-là de la même couleur, il faut mémoriser la dernière
+  couleur non neutre rencontrée — et reteindre après coup celles arrivées avant elle,
+  rien ne garantissant qu'un abonnement précède une série de visionnage.
+- En banc d'essai, les **variables de thème de Twitch doivent être définies** : sans
+  `--color-border-quote`, la barre d'une série de visionnage a une couleur invalide, donc
+  transparente, et la fixture ne représente plus ce qui s'affiche.
+- Le message joint à un abonnement vit **hors de la rangée icône + texte** : sans retrait
+  explicite, il démarre au bord de la notice, sous l'icône, au lieu de s'aligner sur la
+  phrase qu'il complète.
 - Twitch **n'applique pas la couleur de chat au pseudo d'une notice** : il sort dans la
   couleur du texte. Une fois la notice grisée, il s'y noie. Le script la retrouve dans
   l'index alimenté par les messages, et met le pseudo en attente quand la personne n'a

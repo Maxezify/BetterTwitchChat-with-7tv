@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.15.0
+// @version      15.16.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -46,7 +46,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.15.0';
+    const VERSION = '15.16.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -109,6 +109,10 @@
             // le pseudo sort dans la couleur du texte, donc en gris comme le reste une
             // fois la notice compactée, et on ne voit plus de qui il s'agit.
             colorNames: true,
+            // Teinte le fond de la notice avec la couleur de sa barre, comme 7TV teinte
+            // les messages qu'il relève. Twitch pose la couleur d'accent de la chaîne en
+            // style inline sur cette barre. 0 pour ne pas teindre du tout.
+            tintOpacity: 0.15,
             fontSize: '12.5px',
             lineHeight: '1.35',
             iconSize: '15px',
@@ -292,6 +296,10 @@
         // La classe doublée porte la spécificité à (0,2,0), le sélecteur de type à
         // (0,2,1) : nous passons devant quel que soit l'ordre, sans dépendre du hachage
         // de Twitch qui change à chaque build.
+        // Espace entre l'icône et le texte d'une notice. Nommé parce que deux règles
+        // doivent s'accorder dessus : celle qui l'écarte, et celle qui aligne le message
+        // d'abonnement sur ce même bord.
+        const NOTICE_GAP = '6px';
         const Q = 'p.btc-reply-quote.btc-reply-quote';
         const NL = '.btc-notice-line.btc-notice-line';
         const NC = '.btc-notice-card.btc-notice-card';
@@ -395,6 +403,12 @@
         ${NC} {
             padding: 3px 8px 3px 0 !important;
             margin: 1px 0 !important;
+            /* Teinte additive : posée en dégradé, elle se compose avec le fond de Twitch
+               au lieu de l'écraser — même procédé que le fond des réponses. La variable
+               est renseignée en JS depuis la couleur de la barre ; sans elle, la règle
+               retombe sur du transparent et ne change rien. */
+            background-image: linear-gradient(var(--btc-notice-tint, transparent),
+                                              var(--btc-notice-tint, transparent)) !important;
         }
         ${NC} .btc-notice-bar {
             width: 3px !important;
@@ -450,7 +464,11 @@
         ${NL} ${SEL.resubCustom} {
             font-size: ${c.quoteLook ? 'inherit' : '14px'} !important;
             line-height: ${c.quoteLook ? c.lineHeight : '1.5'} !important;
-            margin-top: 2px !important;
+            /* Le message vit hors de la rangée icône + texte : il démarrait donc au
+               bord de la notice, sous l'icône, au lieu de s'aligner sur la phrase
+               qu'il complète. On lui redonne le retrait de cette rangée, calculé sur
+               les mêmes valeurs pour que les deux ne puissent pas diverger. */
+            margin: 2px 0 0 calc(${c.iconSize} + ${NOTICE_GAP}) !important;
         }
         /* La ligne imbriquée porte le remplissage d'un message de chat : dans une
            notice, ces 20 px de côté décalent le texte sans rien apporter. */
@@ -488,7 +506,7 @@
                première ligne : sur une notice de deux ou trois lignes, elle pendait en
                haut à gauche au lieu de tenir le bloc. */
             align-items: center !important;
-            gap: 6px !important;
+            gap: ${NOTICE_GAP} !important;
         }
         ${NL} .btc-notice-icon {
             flex: 0 0 auto !important;
@@ -1115,6 +1133,65 @@
         }
     };
 
+    // =========================================================================
+    // TEINTE DES NOTICES
+    // Twitch pose la couleur d'accent de la chaîne en style inline sur la barre des
+    // notices d'abonnement. Celle d'une série de visionnage ne la porte pas : elle
+    // retombe sur un gris de thème (--color-border-quote). On retient donc la dernière
+    // couleur non neutre rencontrée pour teinter aussi celles qui n'en ont pas — sans
+    // quoi la moitié des notices resteraient grises.
+    // =========================================================================
+    let accentChaine = '';
+
+    // Notices teintées d'un gris faute de mieux : la couleur de la chaîne n'était pas
+    // encore connue. Rien ne garantit qu'une notice d'abonnement arrive en premier —
+    // une série de visionnage peut très bien ouvrir la session. On les revoit dès que
+    // la couleur se présente, comme on recolore les pseudos mis en attente.
+    const CARTES_NEUTRES_MAX = 40;
+    const cartesNeutres = new Set();
+
+    /** Un gris n'est pas une couleur de chaîne : ses trois composantes se valent. */
+    const estNeutre = (red, green, blue) =>
+        Math.max(red, green, blue) - Math.min(red, green, blue) < 12;
+
+    const poserTeinte = (card, composantes) => {
+        card.style.setProperty('--btc-notice-tint',
+            `rgba(${composantes.join(', ')}, ${CONFIG.compact.tintOpacity})`);
+    };
+
+    const tintNotice = (card, bar) => {
+        if (!CONFIG.compact.tintOpacity) return;
+        let composantes = null;
+        try {
+            const m = getComputedStyle(bar).backgroundColor.match(/rgba?\(([^)]+)\)/);
+            if (!m) return;
+            const [red, green, blue, alpha] = m[1].split(',').map(v => parseFloat(v));
+            if (![red, green, blue].every(Number.isFinite)) return;
+            if (alpha === 0) return;                    // barre invisible : rien à reprendre
+            composantes = [red, green, blue];
+        } catch (e) { return; }
+
+        if (!estNeutre(...composantes)) {
+            const decouverte = accentChaine !== composantes.join(', ');
+            accentChaine = composantes.join(', ');
+            if (decouverte && cartesNeutres.size) {
+                const rattrapage = accentChaine.split(',').map(v => parseFloat(v));
+                for (const attente of cartesNeutres) {
+                    if (attente.isConnected) poserTeinte(attente, rattrapage);
+                }
+                cartesNeutres.clear();
+            }
+        } else if (accentChaine) {
+            composantes = accentChaine.split(',').map(v => parseFloat(v));
+        } else {
+            if (cartesNeutres.size >= CARTES_NEUTRES_MAX) {
+                cartesNeutres.delete(cartesNeutres.values().next().value);
+            }
+            cartesNeutres.add(card);
+        }
+        poserTeinte(card, composantes);
+    };
+
     const compactNotice = (noticeLine) => {
         if (!CONFIG.compact.enabled) return;
         noticeLine.classList.add('btc-notice-line');
@@ -1134,6 +1211,7 @@
         const bar = noticeLine.previousElementSibling;
         if (bar && !bar.childElementCount && bar.getAttribute('style')) {
             bar.classList.add('btc-notice-bar');
+            tintNotice(card, bar);
         }
     };
 
@@ -1493,7 +1571,9 @@
     const start = (root) => {
         if (observer) observer.disconnect();
         chatRoot = root;
-        scroller = null;   // la navigation SPA remplace tout l'arbre du chat
+        scroller = null;      // la navigation SPA remplace tout l'arbre du chat
+        accentChaine = '';    // et on change de chaîne, donc de couleur d'accent
+        cartesNeutres.clear();
         observer = new MutationObserver(onMutations);
         observer.observe(root, {
             childList: true,
