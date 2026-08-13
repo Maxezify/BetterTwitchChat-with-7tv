@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-72 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+75 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -12,10 +12,11 @@ node tools/tests/run.mjs
 
 Les assertions portent sur le style calculé, pas sur la simple présence de classes :
 troncature réellement annulée, police et couleur effectives de la citation, emote
-servie par le CDN 7TV, taille de l'illustration « cadeau mystère », couleur de grade
-reprise sur la citation, calage vertical de la bulle sur la première ligne, absence
-de débordement horizontal, idempotence après plusieurs passes, comportement après
-navigation SPA, et bon fonctionnement des trois présentations de citation.
+servie par le CDN 7TV, taille de l'illustration « cadeau mystère », épaisseur de la barre
+gauche identique avec et sans couleur de grade, calage vertical de la bulle sur la
+première ligne, absence de débordement horizontal, idempotence après plusieurs passes,
+comportement après navigation SPA, et bon fonctionnement des trois présentations de
+citation.
 
 Prérequis : Playwright avec Chromium (`npm i -D playwright && npx playwright install
 chromium`, ou une installation globale — le script résout les deux).
@@ -87,8 +88,13 @@ Autres constats utiles :
   ni la classe ni la variable et n'a aucun effet.
 - 7TV trace déjà ses propres séparateurs entre messages
   (`seventv-chat-lines-separator-twitch`) : en ajouter doublait le trait.
-- Sa bordure de highlight fait 2 px. Un filet plus épais posé par-dessus donne un trait
-  d'apparence double.
+- Sa bordure de highlight fait 2 px, et elle s'**additionne** à tout filet posé par-dessus :
+  un `box-shadow` interne de 2 px sur une ligne déjà bordée donne 4 px visibles, soit un
+  trait deux fois trop épais sur les messages de grade. Le filet doit donc être retiré là
+  où 7TV en trace déjà un — et cette présence se **mesure** (`borderLeftWidth` du style
+  calculé), elle ne se déduit pas des variables inline : le highlight « premier message »
+  (`seventv-chat-message-first-highlight`) dessine sa bordure depuis la feuille de style,
+  sans poser aucune variable.
 - Les réglages actifs sont lisibles dans la liste de classes de `<html>`
   (`seventv-chat-message-style-full-width`, `seventv-chat-mention-highlight-enabled`…).
 - 7TV applique aux emotes un `style` inline `width/max-width/max-height` en `!important`.

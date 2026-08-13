@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.9.0
+// @version      15.9.1
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -45,7 +45,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.9.0';
+    const VERSION = '15.9.1';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -219,8 +219,10 @@
     const buildReplyStyles = (r) => ({
         rail: `
         /* Le filet est un box-shadow interne : contrairement à une bordure, il ne
-           décale pas le texte et se superpose proprement à celui de 7TV. */
-        .chat-line__message.btc-reply.btc-reply {
+           décale pas le texte du message.
+           Pas de filet là où 7TV trace déjà le sien : les deux s'additionneraient et
+           la barre paraîtrait deux fois trop épaisse sur les messages de grade. */
+        .chat-line__message.btc-reply.btc-reply:not(.btc-native-accent) {
             box-shadow: inset ${r.accentWidth} 0 0 0 var(--btc-reply-accent);
         }
         .btc-reply-slot.btc-reply-slot {
@@ -698,21 +700,37 @@
     const isTransparent = (color) =>
         !color || color === 'transparent' || /rgba\(\s*0,\s*0,\s*0,\s*0\s*\)/.test(color);
 
+    /**
+     * Marque les lignes où 7TV dessine déjà sa barre, pour que le style rail n'en
+     * superpose pas une seconde. On ne touche à la classe que si elle change : la
+     * modifier déclencherait notre propre observateur d'attributs.
+     */
+    const appliquerBarreNative = (line, presente) => {
+        if (line.classList.contains('btc-native-accent') !== presente) {
+            line.classList.toggle('btc-native-accent', presente);
+        }
+    };
+
     const applyGradeAccent = (line) => {
         let accent = null;
+        // 7TV trace-t-il déjà sa propre barre à gauche de cette ligne ? Si oui, le filet
+        // s'ajouterait à la sienne et la ferait paraître deux fois trop épaisse. Il faut
+        // donc le mesurer, pas seulement lire la couleur déclarée : un highlight de
+        // premier message, par exemple, dessine une bordure sans poser de variable.
+        let barreNative = false;
         try {
-            // Source la plus fiable : 7TV pose la couleur de sa règle de highlight en
-            // variable inline sur la ligne. On lit l'attribut style directement — pas
-            // getComputedStyle, qui forcerait un recalcul de style synchrone à chaque
-            // réponse, en pleine frame d'animation.
+            const cs = getComputedStyle(line);
+            barreNative = parseFloat(cs.borderLeftWidth) > 0 && !isTransparent(cs.borderLeftColor);
+
+            // Couleur : la variable inline de 7TV d'abord, c'est la source autoritative.
             const inline = (line.style.getPropertyValue('--seventv-chat-custom-highlight-border-color')
                 || line.style.getPropertyValue('--seventv-chat-custom-highlight-color')).trim();
             if (inline) {
                 line.style.setProperty('--btc-reply-accent', inline);
+                appliquerBarreNative(line, barreNative);
                 return;
             }
 
-            const cs = getComputedStyle(line);
             // Repli : la couleur peut venir d'une feuille de style plutôt que d'un
             // attribut inline. Là, seul le style calculé la connaît.
             const declared = (cs.getPropertyValue('--seventv-chat-custom-highlight-border-color')
@@ -735,6 +753,7 @@
 
         if (accent) line.style.setProperty('--btc-reply-accent', accent);
         else line.style.removeProperty('--btc-reply-accent');
+        appliquerBarreNative(line, barreNative);
     };
 
     /** Twitch signale une réponse par l'aria-label ; 7TV par un attribut dédié. */

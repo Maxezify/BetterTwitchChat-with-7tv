@@ -284,16 +284,25 @@ const r = await page.evaluate(() => {
                     + parseFloat(getComputedStyle(line).paddingTop);
                 return Math.round(quote.getBoundingClientRect().top - hautContenu);
             }).filter(v => v !== null),
-        // Le filet doit avoir la même épaisseur que la bordure posée par 7TV, sinon les
-        // deux barres superposées donnent un trait deux fois trop épais.
-        largeurFiletVsSeptTV: (() => {
-            const hl = document.querySelector('.seventv-chat-message-custom-highlight');
-            if (!hl) return null;
-            const cs = getComputedStyle(hl);
-            const filet = (cs.boxShadow.match(/(\d+(?:\.\d+)?)px\s+0px\s+0px\s+0px\s+inset/)
-                || cs.boxShadow.match(/inset\s+(\d+(?:\.\d+)?)px/) || [])[1];
-            return { filet: filet ? Math.round(parseFloat(filet)) : null,
-                     bordure7tv: Math.round(parseFloat(cs.borderLeftWidth)) };
+        // Largeur totale de la barre visible à gauche : bordure de 7TV plus notre filet.
+        // Les deux s'additionnent visuellement, c'est ce total qui doit rester constant
+        // entre une réponse ordinaire et celle d'un modérateur.
+        barreGauche: (() => {
+            const mesurer = (el) => {
+                if (!el) return null;
+                const cs = getComputedStyle(el);
+                const ombre = (cs.boxShadow.match(/(\d+(?:\.\d+)?)px\s+0px\s+0px\s+0px\s+inset/)
+                    || cs.boxShadow.match(/inset\s+(\d+(?:\.\d+)?)px/) || [])[1];
+                const bordure = parseFloat(cs.borderLeftWidth) || 0;
+                const filet = ombre ? parseFloat(ombre) : 0;
+                return { bordure: Math.round(bordure), filet: Math.round(filet),
+                         total: Math.round(bordure + filet) };
+            };
+            const lignes = [...document.querySelectorAll('.chat-line__message.btc-reply')];
+            return {
+                grade: mesurer(lignes.find(l => l.classList.contains('seventv-chat-message-custom-highlight'))),
+                ordinaire: mesurer(lignes.find(l => !l.classList.contains('seventv-chat-message-custom-highlight')))
+            };
         })(),
         separateurAjoute: (() => {
             const line = document.querySelector('.chat-line__message.btc-reply');
@@ -368,8 +377,12 @@ check('espace au-dessus de la citation', r.espaceAuDessus, (v) => v.length >= 2 
 check('espaces haut et bas symétriques', r.espaceAuDessus,
     (v) => v.every((haut, i) => Math.abs(haut - r.gapCitationMessage[i]) <= 1));
 check('pseudos cités soulignés', r.pseudosSoulignes, true);
-check('filet de la même épaisseur que celui de 7TV', r.largeurFiletVsSeptTV,
-    (v) => v && v.filet !== null && v.filet === v.bordure7tv);
+check('aucun filet en double là où 7TV trace le sien', r.barreGauche,
+    (v) => v && v.grade && v.grade.filet === 0 && v.grade.bordure > 0);
+check('filet présent sur une réponse ordinaire', r.barreGauche,
+    (v) => v && v.ordinaire && v.ordinaire.filet > 0);
+check('barre gauche de même épaisseur avec et sans grade', r.barreGauche,
+    (v) => v && v.grade && v.ordinaire && v.grade.total === v.ordinaire.total);
 check('aucun séparateur ajouté', r.separateurAjoute, false);
 check('pseudo de notice sur la ligne du texte', r.noticeNomEnLigne, (v) => v !== null && v <= 3);
 check('donateur du gift multiple sur la ligne du texte', r.giftDonorEnLigne, (v) => v !== null && v <= 3);
@@ -402,7 +415,8 @@ check('notice système 7TV traduite', r.sysNoticeText, 'timedout_user a été ex
 
 // --- 4. couleur de grade 7TV reprise sur la réponse ---
 check('accent de grade lu depuis la variable 7TV', r.gradeAccent, '#55E800');
-check('filet de grade sur toute la ligne', r.lineBoxShadow, (v) => /rgb\(85, 232, 0\).*inset/.test(v));
+// 7TV trace déjà sa barre sur cette ligne : nous ne devons rien ajouter par-dessus.
+check('pas d\'ombre ajoutée sur une ligne colorée par 7TV', r.lineBoxShadow, 'none');
 check('pseudo cité non coloré par défaut', r.quotedNameColored, '');
 check('bulle calée sur la première ligne', r.iconOffsets, (v) => v.length >= 2 && v.every(o => Math.abs(o) <= 1.5));
 // Égalité stricte serait trompeuse : une emote décale la ligne de base d'une fraction
@@ -438,6 +452,24 @@ const accentAfter = await page.evaluate(() =>
     document.querySelector('#late .chat-line__message').style.getPropertyValue('--btc-reply-accent'));
 check('pas d\'accent sans highlight', accentBefore, '');
 check('accent capté quand 7TV colore après coup', accentAfter, '#E005B9');
+
+// Le highlight « premier message » de 7TV trace une bordure depuis sa feuille de style,
+// sans poser la moindre variable inline. Lire les variables ne suffit donc pas à savoir
+// qu'une barre existe déjà : il faut mesurer le style calculé.
+const premierMessage = await page.evaluate(async () => {
+    const root = document.querySelector('[data-test-selector="chat-scrollable-area__message-container"]');
+    const holder = document.createElement('div');
+    holder.innerHTML = window.__LATER.replyMod;
+    holder.firstElementChild.id = 'premier';
+    holder.firstElementChild.querySelector('.chat-line__message')
+        .classList.add('seventv-chat-message-first-highlight');
+    root.appendChild(holder.firstElementChild);
+    await new Promise(r => setTimeout(r, 250));
+    const cs = getComputedStyle(document.querySelector('#premier .chat-line__message'));
+    return { bordure: Math.round(parseFloat(cs.borderLeftWidth) || 0), ombre: cs.boxShadow };
+});
+check('barre unique aussi sur un highlight sans variable inline', premierMessage,
+    (v) => v.bordure > 0 && v.ombre === 'none');
 
 // --- mise à jour automatique : Tampermonkey a besoin des deux directives ---
 check('@updateURL présent', SCRIPT, (t) => t.includes('// @updateURL') && t.includes(RAW_URL));
