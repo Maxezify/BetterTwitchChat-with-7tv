@@ -11,7 +11,8 @@ Userscript Tampermonkey qui rend le chat de Twitch plus lisible, compatible avec
 | **Citation lisible en entier** | Twitch tronque la citation à une seule ligne avec des points de suspension. Elle est désormais affichée intégralement. |
 | **Citation discrète** | Police à 78 % du texte du chat, gris uni, pseudos soulignés, bulle calée sur la première ligne. Le « @pseudo » cité peut reprendre sa couleur de chat (`reply.colorQuotedName`), désactivé par défaut car trop voyant. |
 | **Emotes dans les citations** | Twitch ne met que du texte brut dans la citation. Le script indexe les emotes (7TV et Twitch) qui passent dans le chat et les réaffiche dans les réponses. |
-| **Notices compactées** | Subs, Primes, resubs, gifts, raids et séries de visionnage prennent la typographie du texte cité — même taille, même gris — et ne forment plus qu'un seul paragraphe. Tout ce que Twitch y range en bloc revient dans le flux : le pseudo, mais aussi la rangée « pseudo + points de chaîne » d'une série de visionnage, qui occupait cinq lignes à elle seule. Seul le pseudo garde sa couleur. L'illustration « cadeau mystère » de 96 px devient une vignette de 26 px. |
+| **Notices compactées** | Subs, Primes, resubs, gifts, raids et séries de visionnage prennent la typographie du texte cité — même taille, même gris — et ne forment plus qu'un seul paragraphe. Tout ce que Twitch y range en bloc revient dans le flux : le pseudo, mais aussi la rangée « pseudo + points de chaîne » d'une série de visionnage, qui occupait cinq lignes à elle seule. L'icône est centrée sur la hauteur du bloc. L'illustration « cadeau mystère » de 96 px devient une vignette de 26 px. |
+| **Pseudo coloré dans les notices** | Twitch n'applique pas la couleur de chat au pseudo d'une notice : il sort dans la couleur du texte et se noie une fois la notice grisée. Le script la repose depuis les messages vus passer. Une série de visionnage récompensant le fait de regarder et non d'écrire, la personne n'a souvent jamais parlé quand la notice tombe : le pseudo est alors recoloré après coup, dès son premier message. En attendant, il garde la couleur de texte de Twitch plutôt que le gris. |
 | **Message d'abonnement** | Le message écrit par la personne qui s'abonne est une ligne de chat complète imbriquée dans la notice, que Twitch rend à sa taille normale : il ressortait comme un corps étranger. Il prend la même typographie que la citation — ce sont, comme elle, les mots de quelqu'un d'autre — mais garde son propre bloc, pour qu'on sache toujours qui parle. |
 | **Gifts multiples regroupés** | « X offre 50 abonnements » absorbe les « X a offert un abonnement à Y » qui suivent et affiche la liste des destinataires sur une seule notice. |
 | **Chat toujours collé en bas** | Dérouler une citation agrandit le message *après* que Twitch a fait défiler : le bas du nouveau message passait sous le pli. Le script remet le chat au bas une fois la ligne à sa taille définitive — et seulement si le chat y était déjà, pour ne jamais interrompre une lecture en cours dans l'historique. |
@@ -51,6 +52,7 @@ reply.colorQuotedName // recolore le « @pseudo » cité (désactivé par défau
 
 compact.enabled        // compactage des notices sub/prime/gift
 compact.quoteLook      // notices à la taille et à la couleur du texte cité
+compact.colorNames     // rend au pseudo d'une notice sa couleur de chat
 compact.fontSize       // taille des notices quand quoteLook est désactivé
 compact.textIndent     // espace entre la barre de couleur et le contenu
 compact.aggregateGifts // regroupement des gifts multiples
@@ -145,7 +147,7 @@ styled-components changeant à chaque build de Twitch.
 
 - [`tools/7tv-dom-recorder.user.js`](tools/7tv-dom-recorder.user.js) — capture la
   structure réelle du chat pour diagnostiquer une future casse.
-- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 100 vérifications du script contre du
+- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 107 vérifications du script contre du
   DOM Twitch réellement capturé, exécutées dans Chromium.
 
 Voir [`tools/README.md`](tools/README.md).

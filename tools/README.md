@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-100 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+107 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -104,6 +104,20 @@ Autres constats utiles :
   étiqueté qu'en remontant depuis `.tw-svg`, elle n'en reçoit aucun : toute règle visant
   `.btc-notice-text` la manque, et elle restait seule en blanc. Les règles de couleur
   visent donc la ligne de notice entière.
+- Twitch déclare la taille de police **sur chaque fragment de texte** d'une notice, via
+  ses composants `CoreText` hachés et en `!important` — exactement le rapport de force
+  déjà rencontré sur la citation avec `.OLUUU`. Poser la taille sur la ligne de notice ne
+  suffit donc pas : elle est réécrite fragment par fragment. Il faut un sélecteur de type
+  (`.btc-notice-line.btc-notice-line p`, soit (0,2,1)) pour passer devant, et **hériter**
+  au lieu de recalculer. Attention en banc d'essai : une règle concurrente déclarée en
+  tête de document nous laisse gagner à spécificité égale — c'est l'injection **tardive**
+  de styled-components qui fait perdre, et elle seule rend le test probant.
+- Twitch **n'applique pas la couleur de chat au pseudo d'une notice** : il sort dans la
+  couleur du texte. Une fois la notice grisée, il s'y noie. Le script la retrouve dans
+  l'index alimenté par les messages, et met le pseudo en attente quand la personne n'a
+  pas encore parlé — cas courant pour une série de visionnage, qui récompense le fait de
+  regarder. Seul le message joint à un abonnement porte la couleur en style inline : là,
+  elle est lue directement.
 - Dans les notices, Twitch enveloppe le pseudo dans des conteneurs rendus en bloc
   (`span > .chatter-name`), ce qui le pousse sur sa propre ligne au-dessus du texte.
   Le bloc texte du gift multiple est en plus une colonne flex. Les deux sont remis en

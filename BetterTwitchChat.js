@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.14.0
+// @version      15.15.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -46,7 +46,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.14.0';
+    const VERSION = '15.15.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -105,6 +105,10 @@
             // arrêter. Le pseudo garde sa couleur. À false, c'est `fontSize` qui règle
             // la taille et les notices gardent la couleur du texte de Twitch.
             quoteLook: true,
+            // Redonne au pseudo d'une notice sa couleur de chat. Twitch ne la met pas :
+            // le pseudo sort dans la couleur du texte, donc en gris comme le reste une
+            // fois la notice compactée, et on ne voit plus de qui il s'agit.
+            colorNames: true,
             fontSize: '12.5px',
             lineHeight: '1.35',
             iconSize: '15px',
@@ -409,6 +413,23 @@
         ${NL} span:not(.btc-gift-recipient) {
             line-height: ${c.lineHeight} !important;
         }
+        /* Twitch déclare la taille de police sur ses propres composants de texte — les
+           classes CoreText hachées — et en !important. La taille posée sur la ligne de
+           notice était donc réécrite fragment par fragment : la notice restait à la
+           taille de Twitch pendant que le message d'abonnement, lui, suivait la nôtre.
+           Même rapport de force que sur la citation, même parade : le sélecteur de type
+           porte la spécificité à (0,2,1) et passe devant, sans dépendre d'un hachage qui
+           change à chaque build. On hérite au lieu de recalculer — la ligne porte déjà
+           la bonne taille, et répéter calc(1em * échelle) la réduirait à chaque niveau. */
+        ${NL} p,
+        ${NL} span,
+        ${NL} div,
+        ${NL} a,
+        ${NL} b,
+        ${NL} strong,
+        ${NL} button {
+            font-size: inherit !important;
+        }
         ${NL} > * svg {
             width: ${c.iconSize} !important;
             height: ${c.iconSize} !important;
@@ -452,7 +473,7 @@
         }
         ${NL} ${SEL.massGiftName} {
             display: inline !important;
-            font-size: ${c.fontSize} !important;
+            font-size: ${c.quoteLook ? 'inherit' : c.fontSize} !important;
             margin: 0 !important;
         }
         /* Bord gauche irrégulier : l'icône vivait dans le flux du texte, si bien que la
@@ -463,7 +484,10 @@
            cible — il l'a fait. */
         ${NL} .btc-notice-row {
             display: flex !important;
-            align-items: flex-start !important;
+            /* Icône centrée sur la hauteur de la notice entière, et non calée sur sa
+               première ligne : sur une notice de deux ou trois lignes, elle pendait en
+               haut à gauche au lieu de tenir le bloc. */
+            align-items: center !important;
             gap: 6px !important;
         }
         ${NL} .btc-notice-icon {
@@ -568,6 +592,22 @@
         ${NL} ${SEL.resubCustom} .chat-badge {
             height: calc(${c.lineHeight} * 1em) !important;
             width: auto !important;
+        }
+        /* Un pseudo dont la couleur reste inconnue — la personne n'a pas encore parlé —
+           ne doit pas fondre dans le gris de la notice : il garde la couleur de texte
+           de Twitch, comme avant compactage. Le style inline posé par le script quand
+           la couleur est connue passe devant, un !important en ligne l'emportant sur un
+           !important de feuille quelle que soit la spécificité. */
+        ${NL} .chatter-name,
+        ${NL} ${SEL.massGiftName} {
+            color: var(--color-text-base, #efeff1) !important;
+        }
+        /* Un pseudo dont on a retrouvé la couleur : les enveloppes intérieures que
+           Twitch colore par ses propres classes doivent suivre la nôtre. Posée
+           uniquement sur les pseudos recolorés, pour que les autres gardent le rendu
+           de Twitch au lieu de virer au gris. */
+        ${NL} .btc-notice-name span {
+            color: inherit !important;
         }
         ` : ''}
         ` : ''}
@@ -716,6 +756,61 @@
                 nameColors.delete(nameColors.keys().next().value);
             }
             nameColors.set(login, color);
+
+            // Un pseudo de notice attendait cette couleur : on le sert maintenant.
+            const attente = pendingNoticeNames.get(login);
+            if (attente) {
+                for (const el of attente) {
+                    if (el.isConnected) applyNoticeNameColor(el, color);
+                }
+                pendingNoticeNames.delete(login);
+            }
+        }
+    };
+
+    // =========================================================================
+    // COULEUR DES PSEUDOS DE NOTICE
+    // Twitch n'applique pas la couleur de chat au pseudo d'une notice : il sort dans la
+    // couleur du texte, donc en gris comme le reste une fois la notice compactée. On la
+    // repose depuis l'index alimenté par les messages. La personne n'a pas forcément
+    // encore parlé — une série de visionnage récompense le fait de regarder, pas
+    // d'écrire — alors le pseudo est mis en attente et recoloré dès qu'un de ses
+    // messages passe.
+    // =========================================================================
+    const PENDING_NAMES_MAX = 60;
+    const pendingNoticeNames = new Map();   // login -> Set(éléments)
+
+    const applyNoticeNameColor = (el, color) => {
+        el.classList.add('btc-notice-name');
+        // En important : Twitch colore les enveloppes intérieures par ses propres
+        // classes, qu'un style inline ordinaire ne dépasserait pas.
+        el.style.setProperty('color', color, 'important');
+    };
+
+    const colorNoticeNames = (noticeLine) => {
+        if (!CONFIG.compact.colorNames) return;
+        // Source exacte quand elle existe : le message joint à un abonnement porte la
+        // couleur en style inline. On la préfère à l'index, qui repose sur le nom
+        // affiché et peut manquer quelqu'un dont le login diffère.
+        const auteur = noticeLine.querySelector(`${SEL.resubCustom} ${SEL.username}`);
+        const couleurJointe = auteur ? (auteur.style.color || '').trim() : '';
+
+        for (const nom of noticeLine.querySelectorAll(`${SEL.chatterName},${SEL.massGiftName}`)) {
+            // Le pseudo du message joint a déjà la sienne, posée par Twitch.
+            if (nom.closest(SEL.resubCustom)) continue;
+            if (nom.classList.contains('btc-notice-name')) continue;
+
+            const login = nom.textContent.trim().toLowerCase();
+            const color = couleurJointe || (login && nameColors.get(login));
+            if (color) { applyNoticeNameColor(nom, color); continue; }
+            if (!login) continue;
+
+            if (pendingNoticeNames.size >= PENDING_NAMES_MAX) {
+                pendingNoticeNames.delete(pendingNoticeNames.keys().next().value);
+            }
+            let attente = pendingNoticeNames.get(login);
+            if (!attente) { attente = new Set(); pendingNoticeNames.set(login, attente); }
+            attente.add(nom);
         }
     };
 
@@ -1033,6 +1128,7 @@
 
         card.classList.add('btc-notice-card');
         layoutNoticeRow(noticeLine);
+        colorNoticeNames(noticeLine);
         // La barre de couleur est le frère précédent : un div vide avec un
         // background inline.
         const bar = noticeLine.previousElementSibling;

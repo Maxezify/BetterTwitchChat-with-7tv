@@ -98,10 +98,16 @@ const FIXTURE = `<!doctype html><meta charset="utf-8"><title>fixture</title>
      la fixture inventerait alors un défaut que le script n'a pas à corriger. */
   [data-test-selector="user-notice-line"] span:has(> .chatter-name) { display: block !important; }
   [data-test-selector="user-notice-line"] .chatter-name { display: block !important; }
-  /* En production, la couleur de chat du pseudo vient d'une classe hachée posée sur le
-     span le plus intérieur. On la reproduit : sans elle, impossible de vérifier que le
-     pseudo échappe au gris appliqué au reste de la notice. */
-  [data-test-selector="user-notice-line"] .chatter-name span span { color: rgb(0, 173, 3); }
+  /* Twitch déclare la taille de police sur ses composants de texte (les classes
+     CoreText hachées) en !important — même rapport de force que sur la citation, où
+     .OLUUU nous avait fait perdre. Sans cette règle, la fixture laisserait croire que
+     notre taille posée sur la ligne de notice suffit à s'imposer aux fragments. */
+  [data-test-selector="user-notice-line"] .CoreText-sc-1txzju1-0 { font-size: 13px !important; }
+  /* Aucune couleur n'est posée sur le pseudo d'une notice, volontairement. Twitch n'y
+     applique pas la couleur de chat, et rien ne dit qu'il pose la moindre couleur : le
+     pseudo hériterait donc du gris appliqué à la notice et deviendrait indistinct.
+     C'est le cas risqué, donc celui que la fixture doit représenter. La couleur d'un
+     pseudo dans un message joint, elle, vient de la capture — pas d'une règle inventée. */
   /* Carte de notice telle que Twitch la construit : barre de couleur à gauche,
      contenu à droite, le tout en flex. C'est ce qui rend mesurables le collage de la
      barre au bord et l'écart entre la barre et le texte. */
@@ -272,6 +278,15 @@ const r = await page.evaluate(() => {
                     const img = notice.querySelector('img');
                     return img ? Math.round(img.getBoundingClientRect().height) : null;
                 })(),
+                // Écart entre le centre de l'icône et le centre de la notice entière.
+                decalageIcone: (() => {
+                    const ic = notice.querySelector('.btc-notice-icon');
+                    const rangee = notice.querySelector('.btc-notice-row');
+                    if (!ic || !rangee) return null;
+                    const a = ic.getBoundingClientRect();
+                    const b = rangee.getBoundingClientRect();
+                    return Math.round(((a.top + a.height / 2) - (b.top + b.height / 2)) * 10) / 10;
+                })(),
                 // Nombre de lignes visuelles occupées par la notice.
                 // Regroupées par proximité et non par une grille absolue : découper la
                 // position en tranches fixes rendait le compte dépendant de l'endroit
@@ -295,6 +310,14 @@ const r = await page.evaluate(() => {
                 .find(x => x.textContent.trim().length > 20) || n;
             return getComputedStyle(t).color;
         }),
+        // Twitch impose sa taille sur chaque fragment de texte : mesurer la ligne de
+        // notice ne dit rien de ce qui s'affiche réellement. On mesure les fragments,
+        // les siens uniquement — les nôtres ont leurs propres tailles voulues.
+        taillesNotices: qa('.btc-notice-line').flatMap((n) => [...n.querySelectorAll('p,span')]
+            .filter(x => x.textContent.trim().length > 3
+                && !String(x.className).includes('btc-')
+                && !x.closest('.btc-gift-recipients'))
+            .map(x => getComputedStyle(x).fontSize)),
         etiquettesHighlight: qa('[data-seventv-custom-highlight-label]').length,
         // 7TV réserve 1.3rem au-dessus pour son étiquette, 0.75rem en dessous.
         espacesHighlight: hl
@@ -546,8 +569,10 @@ check('série de visionnage : aucun bloc résiduel dans la notice',
     r.watchStreak, (v) => v && v.lignes <= 2);
 check('série de visionnage : texte à la couleur du texte cité',
     r.watchStreak, (v) => v && v.couleur === r.color);
-check('série de visionnage : le pseudo garde sa couleur',
-    r.watchStreak, (v) => v && v.couleurPseudo === 'rgb(0, 173, 3)');
+// Twitch ne colore pas le pseudo d'une notice : sans garde-fou il hériterait du gris
+// appliqué au texte et deviendrait impossible à repérer.
+check('série de visionnage : le pseudo échappe au gris du texte',
+    r.watchStreak, (v) => v && v.couleurPseudo !== r.color);
 check('série de visionnage : espace entre le pseudo et les points',
     r.watchStreak, (v) => v && v.ecarts.apresPseudo >= 2);
 check('série de visionnage : espace entre les points et le texte',
@@ -561,6 +586,12 @@ check('message de resub à la taille de la notice',
 check('message de resub à la couleur du texte cité', r.resubCustomColor, r.color);
 check('toutes les notices à la couleur du texte cité, gift multiple compris',
     r.couleursNotices, (v) => v.length >= 5 && v.every(c => c === r.color));
+// Twitch déclare sa taille sur chaque fragment, en !important : la poser sur la ligne
+// ne suffit pas, et la notice restait plus grosse que la citation qu'elle jouxte.
+check('chaque fragment de notice à la taille du texte cité',
+    r.taillesNotices, (v) => v.length >= 10 && v.every(t => t === r.fontSize));
+check('icône de notice centrée sur la hauteur du bloc',
+    r.watchStreak, (v) => v && Math.abs(v.decalageIcone) <= 1);
 check('message de resub : le pseudo garde sa couleur',
     r.resubPseudoColor, (v) => v && v !== r.color);
 check('message de resub sans le remplissage d\'une ligne de chat',
@@ -628,6 +659,64 @@ const apresHighlight = await page.evaluate(() => {
 check('pas d\'accent sans highlight', accentBefore, '');
 check('accent capté quand 7TV colore après coup', apresHighlight.accent, '#E005B9');
 check('étiquette retirée quand 7TV la pose après coup', apresHighlight.etiquette, false);
+
+// --- couleur du pseudo dans une notice ---
+// Twitch n'y met pas la couleur de chat. Une série de visionnage récompense le fait de
+// regarder, pas d'écrire : la personne n'a souvent jamais parlé quand la notice tombe,
+// et sa couleur est encore inconnue. Le pseudo doit donc être recoloré après coup, au
+// premier message qui passe.
+const couleurAvant = await page.evaluate(() => {
+    const n = [...document.querySelectorAll('.btc-notice-line')]
+        .find(x => /visionnage/i.test(x.textContent));
+    const nom = n.querySelector('.chatter-name');
+    let interne = nom;
+    while (interne.firstElementChild) interne = interne.firstElementChild;
+    return {
+        classe: nom.classList.contains('btc-notice-name'),
+        style: nom.style.color,
+        rendu: getComputedStyle(interne).color
+    };
+});
+await page.evaluate((html) => {
+    const root = document.querySelector('[data-test-selector="chat-scrollable-area__message-container"]');
+    const holder = document.createElement('div');
+    holder.innerHTML = html;
+    root.appendChild(holder.firstElementChild);
+}, LINES.plain
+    .replace(/data-seventv-user-login="[^"]*"/g, 'data-seventv-user-login="streakuser01"')
+    .replace(/data-a-user="[^"]*"/g, 'data-a-user="streakuser01"')
+    .replace(/rgb\(139, 88, 255\)/g, 'rgb(255, 105, 180)')
+    .replace(/>MentionUser01</g, '>StreakUser01<'));
+await page.waitForTimeout(250);
+const couleurApres = await page.evaluate(() => {
+    const n = [...document.querySelectorAll('.btc-notice-line')]
+        .find(x => /visionnage/i.test(x.textContent));
+    const nom = n.querySelector('.chatter-name');
+    let interne = nom;
+    while (interne.firstElementChild) interne = interne.firstElementChild;
+    return { pose: nom.style.color, rendu: getComputedStyle(interne).color };
+});
+check('pseudo de notice sans couleur tant que la personne n\'a pas parlé',
+    couleurAvant, (v) => !v.classe && !v.style);
+// Sans couleur connue, il doit rester lisible plutôt que fondre dans le gris du texte.
+check('pseudo de notice à couleur inconnue non noyé dans le gris',
+    couleurAvant, (v) => v.rendu && v.rendu !== r.color);
+check('pseudo de notice recoloré dès que sa couleur devient connue',
+    couleurApres, (v) => v.pose === 'rgb(255, 105, 180)' && v.rendu === 'rgb(255, 105, 180)');
+
+// Sur un abonnement accompagné d'un message, la couleur est lue directement sur ce
+// message plutôt que dans l'index : elle y est exacte, sans passer par le nom affiché.
+const couleurResub = await page.evaluate(() => {
+    const n = [...document.querySelectorAll('.btc-notice-line')]
+        .find(x => x.querySelector('[data-a-target="chat-resubscription-message__custom-message"]'));
+    const nom = n && n.querySelector('.chatter-name');
+    if (!nom) return null;
+    let interne = nom;
+    while (interne.firstElementChild) interne = interne.firstElementChild;
+    return getComputedStyle(interne).color;
+});
+check('pseudo d\'un abonnement coloré depuis le message joint',
+    couleurResub, 'rgb(95, 158, 160)');
 
 // Le highlight « premier message » de 7TV trace une bordure depuis sa feuille de style,
 // sans poser la moindre variable inline. Lire les variables ne suffit donc pas à savoir
@@ -746,6 +835,26 @@ const vsTwitch = await page.evaluate(async () => {
     rival.remove();
     return out;
 });
+// Même scénario sur les notices : Twitch y déclare la taille par ses composants de
+// texte. La règle de fixture posée en tête de document nous laisserait gagner à
+// spécificité égale — c'est l'injection tardive qui fait perdre, et c'est elle qui rend
+// nécessaire le sélecteur de type. Sans lui, cette vérification tombe.
+const noticeVsTwitch = await page.evaluate(async () => {
+    const rival = document.createElement('style');
+    rival.textContent = '[data-test-selector="user-notice-line"] .CoreText-sc-1txzju1-0'
+        + ' { font-size: 13px !important; }';
+    document.head.appendChild(rival);           // injectée après btc-styles
+    await new Promise(r => setTimeout(r, 60));
+    const notice = [...document.querySelectorAll('.btc-notice-line')]
+        .find(x => /visionnage/i.test(x.textContent));
+    const p = [...notice.querySelectorAll('p')].find(x => /actuellement/i.test(x.textContent));
+    const out = getComputedStyle(p).fontSize;
+    rival.remove();
+    return out;
+});
+check('taille de notice tenue face à un !important injecté après nous',
+    noticeVsTwitch, '10.92px');
+
 check('taille tenue face à un !important concurrent', vsTwitch.fontSize, '10.92px');
 check('déroulement tenu face à un !important concurrent', vsTwitch.whiteSpace, 'normal');
 check('overflow tenu face à un !important concurrent', vsTwitch.overflow, 'visible');
