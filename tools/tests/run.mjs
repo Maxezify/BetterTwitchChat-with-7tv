@@ -613,6 +613,159 @@ const afterNav = await page.evaluate(() => ({
 check('traitement actif après navigation SPA', afterNav.replies, (v) => v >= 1);
 check('gifts en attente purgés à la navigation', afterNav.pendingGifts, 0);
 
+// --- 6. le nouveau message reste entièrement visible ---
+// Nos transformations agrandissent la ligne — citation déroulée, espaces ajoutés — dans
+// la frame qui suit l'insertion, donc APRÈS que Twitch a recollé le chat en bas. Sans
+// compensation, le bas du nouveau message se retrouve sous le pli.
+const EPSILON = 4;   // même tolérance que le script
+
+const reponse = (texte) => LINES.replyMod
+    .replace(/<p title="[^"]*"/, `<p title="${texte}"`)
+    .replace(/(<span dir="auto">)!time(<\/span>)/, `$1${texte}$2`);
+
+const CITATION_LONGUE = '@MentionUser01 citation vraiment très longue que Twitch tronque '
+    + 'en une seule ligne et que le script déroule sur plusieurs lignes';
+const CITATION_EMOTES = `@MentionUser01 ${Array(8).fill(EMOTE_NAME).join(' ')} fin`;
+
+// Une emote jamais vue : son image n'est pas chargée quand la citation la reconstruit,
+// donc ses proportions sont inconnues et la place ne peut pas être réservée d'avance.
+const EMOTE_INEDITE = 'EmoteInedite';
+const messageEmoteInedite = LINES.emoteMessage
+    .replaceAll(EMOTE_NAME, EMOTE_INEDITE)
+    .replace(/emote\/[0-9A-Za-z]+\//g, 'emote/INEDITE/');
+
+// L'ancre du scroller est facultative dans cette fixture : sans elle, le script doit
+// retrouver l'élément qui défile en remontant depuis la racine du chat.
+const fixtureDefilante = (avecAncre) => `<!doctype html><meta charset="utf-8"><title>défilement</title>
+<style>
+  html,body { margin:0; height:100%; background:#0e0e10; color:#efeff1;
+              font:14px/1.5 Inter,Arial,sans-serif; }
+  #defilement { height: 300px; overflow-y: auto; }
+  .chat-line__message { padding: 5px 20px; }
+  .chat-line__message-container > div:first-child p {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0;
+    color: #adadb8; font-size: 13px; }
+  .chat-line__message-container > div:first-child > div { display: flex; align-items: center; gap: 4px; }
+  .tw-svg { display: block; }
+  /* Twitch dimensionne ses badges en CSS. Sans ça ils grandissent à leur chargement et
+     ajoutent un décalage qui ne vient pas du script — faux coupable garanti. */
+  .chat-badge { width: 18px; height: 18px; vertical-align: -4px; }
+</style>
+<div id="defilement" class="scrollable-area"${avecAncre ? ' data-a-target="chat-scroller"' : ''}>
+  <div class="simplebar-content">
+    <div data-test-selector="chat-scrollable-area__message-container"
+         class="chat-scrollable-area__message-container">
+      ${Array.from({ length: 30 }, () => LINES.plain).join('\n')}
+      ${LINES.emoteMessage}
+    </div>
+  </div>
+</div>`;
+
+const ouvrirPageDefilante = async (avecAncre) => {
+    const pg = await browser.newPage({ viewport: { width: 340, height: 320 } });
+    pg.on('pageerror', (e) => pageErrors.push(e.message));
+    await pg.route('**/*', async (route) => {
+        const url = route.request().url();
+        if (url.startsWith('https://www.twitch.tv/')) {
+            return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8',
+                body: fixtureDefilante(avecAncre) });
+        }
+        // Latence CDN : c'est elle qui provoque la seconde poussée de hauteur quand la
+        // largeur de l'emote n'a pas été réservée à l'avance.
+        await new Promise(res => setTimeout(res, 150));
+        return route.fulfill({ status: 200, contentType: 'image/svg+xml',
+            body: '<svg xmlns="http://www.w3.org/2000/svg" width="112" height="32"></svg>' });
+    });
+    await pg.goto('https://www.twitch.tv/examplestreamer');
+    await pg.evaluate(SCRIPT);
+    await pg.waitForTimeout(250);
+    return pg;
+};
+
+const ecartAuBas = (pg) => pg.evaluate(() => {
+    const sc = document.querySelector('#defilement');
+    return Math.round(sc.scrollHeight - sc.scrollTop - sc.clientHeight);
+});
+
+/** Reproduit l'arrivée d'un message dans un chat collé en bas, comme le fait Twitch. */
+const arriveeMessage = async (pg, htmls) => {
+    await pg.evaluate((hs) => {
+        const sc = document.querySelector('#defilement');
+        sc.scrollTop = sc.scrollHeight;      // état « collé en bas »
+        const root = document.querySelector('[data-test-selector="chat-scrollable-area__message-container"]');
+        for (const h of hs) {
+            const holder = document.createElement('div');
+            holder.innerHTML = h;
+            root.appendChild(holder.firstElementChild);
+        }
+        sc.scrollTop = sc.scrollHeight;      // Twitch recolle lui-même, avant notre rAF
+    }, [].concat(htmls));
+    await pg.waitForTimeout(130);
+    const apresScript = await ecartAuBas(pg);
+    await pg.waitForTimeout(500);
+    const apresImages = await ecartAuBas(pg);
+    return { apresScript, apresImages };
+};
+
+const pageDefilante = await ouvrirPageDefilante(true);
+const ordinaire = await arriveeMessage(pageDefilante, LINES.plain);
+const longue = await arriveeMessage(pageDefilante, reponse(CITATION_LONGUE));
+const emotee = await arriveeMessage(pageDefilante, reponse(CITATION_EMOTES));
+const inedite = await arriveeMessage(pageDefilante,
+    [messageEmoteInedite, reponse(`@MentionUser01 ${EMOTE_INEDITE} ${EMOTE_INEDITE} fin`)]);
+
+// Le recollage remet le message en vue, mais une citation qui se re-découpe sous les
+// yeux au moment où les images arrivent reste désagréable. La place réservée d'avance
+// grâce aux proportions mémorisées doit rendre sa hauteur stable dès le premier rendu.
+const stabilite = await (async () => {
+    await pageDefilante.evaluate((h) => {
+        const sc = document.querySelector('#defilement');
+        sc.scrollTop = sc.scrollHeight;
+        const root = document.querySelector('[data-test-selector="chat-scrollable-area__message-container"]');
+        const holder = document.createElement('div');
+        holder.innerHTML = h;
+        holder.firstElementChild.id = 'stable';
+        root.appendChild(holder.firstElementChild);
+        sc.scrollTop = sc.scrollHeight;
+    }, reponse(CITATION_EMOTES));
+    const hauteur = () => pageDefilante.evaluate(() => {
+        const q = document.querySelector('#stable .btc-reply-quote');
+        return q ? Math.round(q.getBoundingClientRect().height) : null;
+    });
+    await pageDefilante.waitForTimeout(60);      // avant que le CDN ne réponde
+    const avant = await hauteur();
+    await pageDefilante.waitForTimeout(600);     // après
+    return { avant, apres: await hauteur() };
+})();
+
+// Quelqu'un qui a remonté l'historique ne doit jamais être ramené en bas de force.
+const remonte = await pageDefilante.evaluate(async (h) => {
+    const sc = document.querySelector('#defilement');
+    sc.scrollTop = sc.scrollHeight - sc.clientHeight - 200;
+    await new Promise(res => setTimeout(res, 80));   // laisse partir l'événement scroll
+    const avant = Math.round(sc.scrollTop);
+    const root = document.querySelector('[data-test-selector="chat-scrollable-area__message-container"]');
+    const holder = document.createElement('div');
+    holder.innerHTML = h;
+    root.appendChild(holder.firstElementChild);
+    await new Promise(res => setTimeout(res, 500));
+    return { avant, apres: Math.round(sc.scrollTop) };
+}, reponse(CITATION_LONGUE));
+
+const pageSansAncre = await ouvrirPageDefilante(false);
+const sansAncre = await arriveeMessage(pageSansAncre, reponse(CITATION_LONGUE));
+
+check('message ordinaire : aucun décalage à compenser', ordinaire.apresScript, (v) => v <= EPSILON);
+check('réponse déroulée entièrement visible', longue.apresImages, (v) => v <= EPSILON);
+check('réponse chargée d\'emotes entièrement visible', emotee.apresImages, (v) => v <= EPSILON);
+check('emote aux proportions inconnues : décalage rattrapé au chargement',
+    inedite.apresImages, (v) => v <= EPSILON);
+check('citation stable pendant le chargement des emotes', stabilite,
+    (v) => v.avant !== null && v.avant === v.apres);
+check('chat remonté : la position de lecture est préservée',
+    remonte, (v) => v.avant === v.apres);
+check('scroller retrouvé sans l\'attribut data-a-target', sansAncre.apresImages, (v) => v <= EPSILON);
+
 await browser.close();
 
 // ---------------------------------------------------------------------------

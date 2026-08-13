@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-75 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+82 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -17,6 +17,11 @@ gauche identique avec et sans couleur de grade, calage vertical de la bulle sur 
 première ligne, absence de débordement horizontal, idempotence après plusieurs passes,
 comportement après navigation SPA, et bon fonctionnement des trois présentations de
 citation.
+
+Une seconde page, réellement défilante, vérifie qu'un nouveau message reste entièrement
+visible après nos transformations et après le chargement des emotes, que la position de
+lecture de quelqu'un qui a remonté l'historique n'est jamais touchée, et que l'élément
+qui défile est retrouvé même privé de son attribut `data-a-target`.
 
 Prérequis : Playwright avec Chromium (`npm i -D playwright && npx playwright install
 chromium`, ou une installation globale — le script résout les deux).
@@ -95,6 +100,22 @@ Autres constats utiles :
   calculé), elle ne se déduit pas des variables inline : le highlight « premier message »
   (`seventv-chat-message-first-highlight`) dessine sa bordure depuis la feuille de style,
   sans poser aucune variable.
+- Le défilement du chat est porté par `.scrollable-area[data-a-target="chat-scroller"]`,
+  **au-dessus** du conteneur de messages. Ancre déclarée et non devinée : 7TV stylise
+  lui-même la scrollbar de ce sélecteur
+  (`.seventv-twitch-chat-scrollbar-hidden .scrollable-area[data-a-target="chat-scroller"]`).
+  Le script garde malgré tout un repli structurel — il remonte depuis la racine du chat
+  jusqu'au premier ancêtre qui déborde réellement.
+- Twitch recolle le chat en bas dans son effet de layout, c'est-à-dire **avant** la frame
+  où notre observateur traite le message. Toute transformation qui agrandit la ligne
+  (citation déroulée, espaces ajoutés) laisse donc le bas du message sous le pli si l'on
+  ne recolle pas soi-même après coup.
+- Une image sans dimensions connues naît à zéro de large puis s'élargit d'un coup à son
+  chargement, ce qui re-découpe le texte autour. Les emotes reconstruites dans les
+  citations portent donc un `aspect-ratio` mémorisé lors de leur passage dans le chat.
+  Attention en banc d'essai : les badges Twitch, s'ils ne sont pas dimensionnés par la
+  CSS de la fixture, produisent exactement le même décalage et font accuser le script à
+  tort.
 - Les réglages actifs sont lisibles dans la liste de classes de `<html>`
   (`seventv-chat-message-style-full-width`, `seventv-chat-mention-highlight-enabled`…).
 - 7TV applique aux emotes un `style` inline `width/max-width/max-height` en `!important`.

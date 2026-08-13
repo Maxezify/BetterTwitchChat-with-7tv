@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.9.1
+// @version      15.10.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -27,6 +27,7 @@
  * là où ils existent.
  *
  * Ancres considérées comme stables :
+ *   [data-a-target="chat-scroller"]                                 élément qui défile
  *   [data-test-selector="chat-scrollable-area__message-container"]  conteneur du chat
  *   .chat-line__message / [data-a-target="chat-line-message"]       ligne de message
  *   .chat-line__message-container                                   corps de la ligne
@@ -45,7 +46,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.9.1';
+    const VERSION = '15.10.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -143,7 +144,10 @@
         massGiftName: '.mystery-gift-theme__displayname',
         massGiftImage: '.mystery-gift-theme__image',
         massGiftOverlay: '.mystery-gift-theme__overlay',
-        emote: 'img[data-emote-name],img.seventv-emote,img.chat-image,img.chat-line__message--emote'
+        emote: 'img[data-emote-name],img.seventv-emote,img.chat-image,img.chat-line__message--emote',
+        // Élément qui porte réellement le défilement du chat. 7TV stylise lui-même sa
+        // scrollbar sur ce sélecteur, c'est donc une ancre déclarée, pas devinée.
+        scroller: '.scrollable-area[data-a-target="chat-scroller"],[data-a-target="chat-scroller"]'
     };
 
     const log = (...args) => { if (CONFIG.debug) console.log('[BTC]', ...args); };
@@ -334,6 +338,9 @@
         ${Q} .btc-reply-emote {
             height: var(--btc-reply-emote-height) !important;
             width: auto !important;
+            /* Assurance : la largeur peut venir d'un aspect-ratio mémorisé. S'il était
+               faux, l'emote serait étirée plutôt que simplement mal cadrée. */
+            object-fit: contain !important;
             vertical-align: -0.32em !important;
             margin: 0 1px !important;
             display: inline-block !important;
@@ -509,7 +516,11 @@
     // réafficher les emotes, on indexe celles qui passent dans le chat.
     // =========================================================================
     const EMOTE_INDEX_MAX = 600;
-    const emoteIndex = new Map(); // nom -> url
+    // nom -> { url, ratio }. Le ratio largeur/hauteur sert à réserver la place de
+    // l'emote dans la citation avant son chargement : sans lui l'image naît à zéro de
+    // large puis s'élargit d'un coup, la citation se re-découpe et le message grandit
+    // une seconde fois — après que Twitch a recollé le chat en bas.
+    const emoteIndex = new Map();
 
     const urlFromSrcset = (srcset) => {
         if (!srcset) return null;
@@ -520,15 +531,28 @@
         return (two || entries[0]).split(/\s+/)[0] || null;
     };
 
+    /** Ratio plausible pour une emote : au-delà, c'est une mesure aberrante. */
+    const ratioPlausible = (r) => (r > 0.1 && r < 12 ? r : 0);
+
     const rememberEmote = (img) => {
         const name = img.dataset.emoteName || img.getAttribute('alt');
-        if (!name || emoteIndex.has(name)) return;
-        const url = img.dataset.fallbackImageUrl
+        if (!name) return;
+        const connu = emoteIndex.get(name);
+        // Déjà connue avec ses proportions : plus rien à en tirer. Sans elles on
+        // retente, l'image de la fois précédente n'était pas encore chargée. On lit
+        // uniquement les dimensions naturelles : mesurer la boîte forcerait un calcul
+        // de mise en page sur chaque emote de chaque message.
+        if (connu && connu.ratio) return;
+        const url = (connu && connu.url)
+            || img.dataset.fallbackImageUrl
             || urlFromSrcset(img.getAttribute('srcset'))
             || img.currentSrc
             || img.getAttribute('src');
         if (!url) return;
-        if (emoteIndex.size >= EMOTE_INDEX_MAX) {
+        const ratio = img.naturalWidth > 0 && img.naturalHeight > 0
+            ? ratioPlausible(img.naturalWidth / img.naturalHeight)
+            : 0;
+        if (!connu && emoteIndex.size >= EMOTE_INDEX_MAX) {
             // FIFO : on jette le plus ancien quart.
             let drop = Math.floor(EMOTE_INDEX_MAX / 4);
             for (const key of emoteIndex.keys()) {
@@ -536,7 +560,7 @@
                 emoteIndex.delete(key);
             }
         }
-        emoteIndex.set(name, url);
+        emoteIndex.set(name, { url, ratio });
     };
 
     const indexEmotes = (root) => {
@@ -657,12 +681,20 @@
                 if (!t) { frag.appendChild(document.createTextNode(part)); continue; }
 
                 if (emoteIndex.has(t)) {
+                    const { url, ratio } = emoteIndex.get(t);
                     const img = document.createElement('img');
-                    img.src = emoteIndex.get(t);
+                    img.src = url;
                     img.alt = t;
                     img.title = t;
                     img.loading = 'lazy';
                     img.className = 'btc-reply-emote';
+                    if (ratio) {
+                        // Place réservée d'avance : le chargement ne déplace plus rien.
+                        img.style.aspectRatio = String(ratio);
+                    } else {
+                        // Proportions inconnues : on rattrapera le décalage au chargement.
+                        img.addEventListener('load', () => onEmoteChargee(img, t), { once: true });
+                    }
                     frag.appendChild(img);
                 } else if (t.length > 1 && t[0] === '@') {
                     const span = document.createElement('span');
@@ -1119,16 +1151,84 @@
     let frameScheduled = false;
     const QUEUE_MAX = 120;
 
+    // =========================================================================
+    // RECOLLAGE EN BAS
+    // Nos transformations agrandissent la ligne : la citation passe d'une ligne
+    // tronquée à plusieurs, les espaces s'ajoutent. Elles s'appliquent dans la frame
+    // qui suit l'insertion, donc APRÈS que Twitch a recollé le chat en bas — le bas du
+    // nouveau message se retrouvait sous le pli. On recolle une fois la ligne à sa
+    // taille définitive, et seulement si le chat y était déjà : quelqu'un qui a remonté
+    // l'historique ne doit jamais être ramené en bas de force.
+    // =========================================================================
+
+    // Twitch recolle au pixel près, mais scrollHeight peut être fractionnaire. Un cran
+    // de molette dépasse largement ce seuil : aucun risque de confondre les deux cas.
+    const SCROLL_EPSILON = 4;
+    let scroller = null;
+    let colleEnBas = true;
+    const scrollersEcoutes = new WeakSet();
+
+    const mesurerCollage = (sc) =>
+        !sc || sc.scrollHeight - sc.scrollTop - sc.clientHeight <= SCROLL_EPSILON;
+
+    const recollerEnBas = (sc) => { if (sc) sc.scrollTop = sc.scrollHeight; };
+
+    const trouverScroller = () => {
+        const defile = (el) => !!el && el.scrollHeight - el.clientHeight > SCROLL_EPSILON;
+        const nomme = document.querySelector(SEL.scroller);
+        if (defile(nomme)) return nomme;
+        // Repli structurel si Twitch déplaçait le débordement sur un autre niveau :
+        // le premier ancêtre du chat qui défile réellement. Aucune classe hachée.
+        let el = chatRoot && chatRoot.parentElement;
+        while (el && el !== document.body) {
+            const oy = getComputedStyle(el).overflowY;
+            if ((oy === 'auto' || oy === 'scroll') && defile(el)) return el;
+            el = el.parentElement;
+        }
+        // Chat pas encore assez rempli pour déborder : rien à compenser de toute façon.
+        return nomme || null;
+    };
+
+    const getScroller = () => {
+        if (!scroller || !scroller.isConnected) scroller = trouverScroller();
+        if (scroller && !scrollersEcoutes.has(scroller)) {
+            scrollersEcoutes.add(scroller);
+            // Seule source fiable de l'intention de lecture : un agrandissement du
+            // contenu n'émet aucun événement de défilement, une action humaine si.
+            scroller.addEventListener('scroll',
+                () => { colleEnBas = mesurerCollage(scroller); }, { passive: true });
+        }
+        return scroller;
+    };
+
+    /**
+     * Une emote dont on ignorait les proportions vient de se charger : elle a pris sa
+     * largeur d'un coup et a pu re-découper la citation. On retient ses proportions
+     * pour les prochaines, puis on rattrape le décalage.
+     */
+    const onEmoteChargee = (img, nom) => {
+        const connu = emoteIndex.get(nom);
+        if (connu && !connu.ratio && img.naturalWidth > 0 && img.naturalHeight > 0) {
+            connu.ratio = ratioPlausible(img.naturalWidth / img.naturalHeight);
+        }
+        if (colleEnBas) recollerEnBas(getScroller());
+    };
+
     const flush = () => {
         const batch = queue;
         queue = [];
         frameScheduled = false;
+        // Mesuré ici et non à l'insertion : à ce stade Twitch a déjà fait son propre
+        // recollage, l'écart au bas reflète donc bien l'intention de qui lit.
+        const sc = getScroller();
+        colleEnBas = mesurerCollage(sc);
         for (const node of batch) {
             if (node.isConnected) {
                 try { processLine(node); }
                 catch (e) { console.error('[BTC] échec du traitement', e); }
             }
         }
+        if (colleEnBas) recollerEnBas(sc);
     };
 
     const enqueue = (node) => {
@@ -1160,6 +1260,7 @@
     const start = (root) => {
         if (observer) observer.disconnect();
         chatRoot = root;
+        scroller = null;   // la navigation SPA remplace tout l'arbre du chat
         observer = new MutationObserver(onMutations);
         observer.observe(root, {
             childList: true,
@@ -1167,6 +1268,9 @@
             attributes: true,
             attributeFilter: ['class', 'data-seventv-processed']
         });
+        // Relevé initial : sans lui, une emote chargée avant le premier lot traité
+        // recollerait le chat en bas alors que rien ne dit qu'il y était.
+        colleEnBas = mesurerCollage(getScroller());
         processLine(root);
         scheduleSelfCheck();
         log('démarré sur', root.className);
