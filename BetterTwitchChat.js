@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.16.0
+// @version      15.17.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -46,7 +46,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.16.0';
+    const VERSION = '15.17.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -422,6 +422,25 @@
                 : c.fontSize} !important;
             line-height: ${c.lineHeight} !important;
             padding: 0 0 0 ${c.textIndent} !important;
+            /* Repère de positionnement pour l'icône, sortie du flux plus bas. */
+            position: relative !important;
+        }
+        /* L'icône est centrée sur la notice entière, message d'abonnement compris. Elle
+           ne peut donc pas rester dans la rangée icône + texte : cette rangée s'arrête
+           au texte, et l'icône se retrouvait haut placée dès qu'un message suivait. On
+           la sort du flux et on réserve sa place par un remplissage sur la notice — ce
+           qui aligne du même coup TOUT le contenu, texte et message, sur un seul bord
+           gauche, au lieu de dépendre d'un retrait recopié à deux endroits.
+           Le remplissage n'est posé que s'il y a une icône : un gift multiple n'en a
+           pas, et son texte serait décalé dans le vide. */
+        ${NL}:has(.btc-notice-icon) {
+            padding-left: calc(${c.textIndent} + ${c.iconSize} + ${NOTICE_GAP}) !important;
+        }
+        ${NL} .btc-notice-icon {
+            position: absolute !important;
+            left: ${c.textIndent} !important;
+            top: 50% !important;
+            transform: translateY(-50%) !important;
         }
         ${NL} p,
         ${NL} span:not(.btc-gift-recipient) {
@@ -464,11 +483,21 @@
         ${NL} ${SEL.resubCustom} {
             font-size: ${c.quoteLook ? 'inherit' : '14px'} !important;
             line-height: ${c.quoteLook ? c.lineHeight : '1.5'} !important;
-            /* Le message vit hors de la rangée icône + texte : il démarrait donc au
-               bord de la notice, sous l'icône, au lieu de s'aligner sur la phrase
-               qu'il complète. On lui redonne le retrait de cette rangée, calculé sur
-               les mêmes valeurs pour que les deux ne puissent pas diverger. */
-            margin: 2px 0 0 calc(${c.iconSize} + ${NOTICE_GAP}) !important;
+            /* Aucun retrait propre : le remplissage de la notice place déjà le message
+               sur le même bord gauche que le texte de l'annonce. */
+            margin: 2px 0 0 0 !important;
+        }
+        /* Twitch enveloppe pseudo et badges dans un <button>, dont la feuille par défaut
+           du navigateur garde le remplissage et la bordure — 1px 6px et 2px, soit 8 px
+           qui décalaient les badges vers la droite par rapport au texte de l'annonce.
+           On neutralise la boîte du bouton plutôt que de compter sur Twitch pour le
+           faire : rien ne garantit qu'il la réinitialise sur toutes ses pages. */
+        ${NL} ${SEL.resubCustom} button {
+            padding: 0 !important;
+            border: 0 !important;
+            margin: 0 !important;
+            background: none !important;
+            vertical-align: baseline !important;
         }
         /* La ligne imbriquée porte le remplissage d'un message de chat : dans une
            notice, ces 20 px de côté décalent le texte sans rien apporter. */
@@ -500,22 +529,19 @@
            les lignes. Les trois rôles sont étiquetés en JS : la profondeur du porte-icône
            varie d'un type de notice à l'autre, un sélecteur CSS unique se tromperait de
            cible — il l'a fait. */
+        /* L'icône étant hors du flux, la rangée n'a plus rien à répartir : un bloc
+           ordinaire suffit, et le texte occupe toute la largeur restante. */
         ${NL} .btc-notice-row {
-            display: flex !important;
-            /* Icône centrée sur la hauteur de la notice entière, et non calée sur sa
-               première ligne : sur une notice de deux ou trois lignes, elle pendait en
-               haut à gauche au lieu de tenir le bloc. */
-            align-items: center !important;
-            gap: ${NOTICE_GAP} !important;
+            display: block !important;
         }
         ${NL} .btc-notice-icon {
-            flex: 0 0 auto !important;
             height: calc(${c.lineHeight} * 1em) !important;
+            width: ${c.iconSize} !important;
             display: flex !important;
             align-items: center !important;
         }
         ${NL} .btc-notice-text {
-            flex: 1 1 auto !important;
+            display: block !important;
             min-width: 0 !important;
         }
 

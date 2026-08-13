@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-112 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+114 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -123,9 +123,19 @@ Autres constats utiles :
 - En banc d'essai, les **variables de thème de Twitch doivent être définies** : sans
   `--color-border-quote`, la barre d'une série de visionnage a une couleur invalide, donc
   transparente, et la fixture ne représente plus ce qui s'affiche.
-- Le message joint à un abonnement vit **hors de la rangée icône + texte** : sans retrait
-  explicite, il démarre au bord de la notice, sous l'icône, au lieu de s'aligner sur la
-  phrase qu'il complète.
+- Le message joint à un abonnement vit **hors de la rangée icône + texte**. Un retrait
+  recopié sur ce message le rattrape, mais laisse deux défauts : la rangée s'arrête au
+  texte, donc une icône centrée dessus se retrouve trop haut dès qu'un message suit, et
+  le bord gauche dépend de deux valeurs à tenir synchronisées. L'icône est donc **sortie
+  du flux** (`position: absolute`, centrée sur la notice) et sa place réservée par un
+  remplissage sur la ligne de notice : tout le contenu s'aligne alors sur un seul bord.
+  Le remplissage est conditionné à la présence d'une icône (`:has(.btc-notice-icon)`) —
+  un gift multiple n'en a pas et son texte serait décalé dans le vide.
+- Twitch enveloppe pseudo et badges dans un `<button>` **dont il ne réinitialise pas la
+  boîte** : la feuille par défaut du navigateur y laisse `padding: 1px 6px` et
+  `border: 2px`, soit **8 px** qui décalent les badges vers la droite. Un alignement
+  mesuré sur les boîtes conteneurs ne le voit pas — il faut mesurer le bord du badge
+  lui-même.
 - Twitch **n'applique pas la couleur de chat au pseudo d'une notice** : il sort dans la
   couleur du texte. Une fois la notice grisée, il s'y noie. Le script la retrouve dans
   l'index alimenté par les messages, et met le pseudo en attente quand la personne n'a

@@ -282,13 +282,14 @@ const r = await page.evaluate(() => {
                     const img = notice.querySelector('img');
                     return img ? Math.round(img.getBoundingClientRect().height) : null;
                 })(),
-                // Écart entre le centre de l'icône et le centre de la notice entière.
+                // Écart entre le centre de l'icône et celui de la notice entière — la
+                // notice, pas la rangée icône + texte : celle-ci s'arrête avant le
+                // message d'abonnement, et centrer dessus laissait l'icône trop haut.
                 decalageIcone: (() => {
                     const ic = notice.querySelector('.btc-notice-icon');
-                    const rangee = notice.querySelector('.btc-notice-row');
-                    if (!ic || !rangee) return null;
+                    if (!ic) return null;
                     const a = ic.getBoundingClientRect();
-                    const b = rangee.getBoundingClientRect();
+                    const b = notice.getBoundingClientRect();
                     return Math.round(((a.top + a.height / 2) - (b.top + b.height / 2)) * 10) / 10;
                 })(),
                 // Nombre de lignes visuelles occupées par la notice.
@@ -344,6 +345,25 @@ const r = await page.evaluate(() => {
             const carte = n && n.closest('.btc-notice-card');
             return carte ? carte.style.getPropertyValue('--btc-notice-tint') : '';
         })(),
+        // Le badge du message d'abonnement doit démarrer exactement au bord du texte de
+        // l'annonce. Twitch l'enveloppe dans un <button> dont la feuille par défaut du
+        // navigateur garde remplissage et bordure : 8 px de décalage vers la droite.
+        alignementBadge: (() => {
+            const msg = q('.btc-notice-line [data-a-target="chat-resubscription-message__custom-message"]');
+            const badge = msg && msg.querySelector('.chat-badge');
+            const texte = msg && msg.closest('.btc-notice-line').querySelector('.btc-notice-text');
+            if (!badge || !texte) return null;
+            return Math.round(
+                (badge.getBoundingClientRect().left - texte.getBoundingClientRect().left) * 10) / 10;
+        })(),
+        // Centrage de chaque icône sur sa notice entière, message compris.
+        decalagesIcones: qa('.btc-notice-line').map((n) => {
+            const ic = n.querySelector('.btc-notice-icon');
+            const b = n.getBoundingClientRect();
+            if (!ic || !b.height) return null;
+            const a = ic.getBoundingClientRect();
+            return Math.round(((a.top + a.height / 2) - (b.top + b.height / 2)) * 10) / 10;
+        }).filter(v => v !== null),
         etiquettesHighlight: qa('[data-seventv-custom-highlight-label]').length,
         // 7TV réserve 1.3rem au-dessus pour son étiquette, 0.75rem en dessous.
         espacesHighlight: hl
@@ -620,6 +640,10 @@ check('icône de notice centrée sur la hauteur du bloc',
     r.watchStreak, (v) => v && Math.abs(v.decalageIcone) <= 1);
 check('message d\'abonnement aligné sur le texte de la notice',
     r.alignementMessage, (v) => v !== null && Math.abs(v) <= 1);
+check('badge du message aligné au pixel sur le texte de la notice',
+    r.alignementBadge, (v) => v !== null && Math.abs(v) <= 0.5);
+check('icône centrée sur chaque notice, message d\'abonnement compris',
+    r.decalagesIcones, (v) => v.length >= 3 && v.every(d => Math.abs(d) <= 1));
 check('notice teintée de la couleur de sa barre',
     r.fondNoticeAbonnement, (v) => /rgba\(250,\s*41,\s*41,\s*0\.15\)/.test(v));
 check('série de visionnage teintée de la couleur de la chaîne malgré sa barre neutre',
