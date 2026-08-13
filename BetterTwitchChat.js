@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.12.0
+// @version      15.13.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -46,7 +46,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.12.0';
+    const VERSION = '15.13.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -100,6 +100,11 @@
         // --- Notices sub / prime / gift / raid ---
         compact: {
             enabled: true,
+            // Donne aux notices la typographie du texte cité : même taille, même gris.
+            // Elles deviennent une information secondaire qu'on parcourt sans s'y
+            // arrêter. Le pseudo garde sa couleur. À false, c'est `fontSize` qui règle
+            // la taille et les notices gardent la couleur du texte de Twitch.
+            quoteLook: true,
             fontSize: '12.5px',
             lineHeight: '1.35',
             iconSize: '15px',
@@ -392,7 +397,11 @@
             min-width: 3px !important;
         }
         ${NL} {
-            font-size: ${c.fontSize} !important;
+            /* Même expression que la citation, donc exactement la même taille rendue :
+               une valeur en pixels recopiée à la main divergerait au premier réglage. */
+            font-size: ${c.quoteLook
+                ? `calc(1em * var(--btc-reply-font-scale, ${r.fontScale}))`
+                : c.fontSize} !important;
             line-height: ${c.lineHeight} !important;
             padding: 0 0 0 ${c.textIndent} !important;
         }
@@ -461,6 +470,46 @@
             display: inline !important;
         }
 
+        /* Une notice tient en un seul flux. Le pseudo n'est pas le seul bloc que Twitch
+           y place : une « série de visionnage » range le pseudo et les points de chaîne
+           dans une rangée à part, au-dessus du texte, et cette rangée contient
+           elle-même des <p> — soit trois retours à la ligne pour une seule notice.
+           Plutôt que d'énumérer des structures qui changeront, tout ce qui vit dans le
+           bloc de texte passe en ligne.
+
+           Exception : le message personnalisé d'un resub, du texte libre écrit par la
+           personne, garde son propre bloc. Le :not() le retire de la sélection et,
+           accessoirement, porte la spécificité de cette règle au-dessus de celle qui le
+           met en forme plus bas — l'ordre des règles ne décide donc de rien ici. */
+        ${NL} .btc-notice-text div:not(:has(${SEL.resubCustom})),
+        ${NL} .btc-notice-text p:not(${SEL.resubCustom}),
+        ${NL} .btc-notice-text span:not(${SEL.resubCustom}) {
+            display: inline !important;
+        }
+
+        /* Ces fragments étaient séparés par des sauts de bloc, pas par des espaces :
+           mis bout à bout ils se recollent (« StreakUser01+ », « 450Série de visionnage
+           atteinte ! »). On rend l'espace à tout fragment qui en précède un autre. Le
+           dernier n'en reçoit pas, sinon la notice traînerait une espace en fin de
+           ligne. Là où Twitch écrit déjà l'espace dans son texte, l'élément se trouve
+           être le dernier de son parent : aucun doublon possible. */
+        ${NL} .btc-notice-text div:not(:last-child)::after,
+        ${NL} .btc-notice-text p:not(:last-child)::after,
+        ${NL} .btc-notice-text .chatter-name:not(:last-child)::after {
+            content: " ";
+            white-space: pre;
+        }
+
+        /* Une boîte rendue en ligne ignore width et height : l'icône de points de
+           chaîne, que Twitch dimensionnait par son conteneur, repartait à sa taille
+           naturelle et faisait enfler la ligne. On la borne sur l'interligne.
+           L'illustration du gift multiple a sa propre taille, plus bas. */
+        ${NL} .btc-notice-text img:not(${SEL.massGiftImage}) {
+            height: calc(${c.lineHeight} * 1em) !important;
+            width: auto !important;
+            vertical-align: -0.2em !important;
+        }
+
         /* Le conteneur du nom du donateur peut être une colonne flex, qui garderait le
            pseudo au-dessus du texte malgré le display:inline. On le repasse en bloc.
            Visé par sa structure : sa classe est un hachage. */
@@ -474,6 +523,17 @@
             content: " ";
             white-space: pre;
         }
+
+        /* Apparence « citation » : le texte de la notice reprend le gris du texte cité
+           pour rester une information secondaire. Le pseudo est exclu — c'est lui qui
+           permet de reconnaître la notice d'un coup d'œil, il garde sa couleur. */
+        ${c.quoteLook ? `
+        ${NL} .btc-notice-text,
+        ${NL} .btc-notice-text p,
+        ${NL} .btc-notice-text span:not(.chatter-name):not(.chatter-name *) {
+            color: var(--btc-reply-color) !important;
+        }
+        ` : ''}
         ` : ''}
 
         /* ---------- Regroupement des gifts multiples ---------- */

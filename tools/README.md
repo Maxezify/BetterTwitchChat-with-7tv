@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-87 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+94 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -75,6 +75,20 @@ Autres constats utiles :
   d'un div de plus qu'un watch streak), donc les rôles sont étiquetés en JS en remontant
   depuis l'icône jusqu'au premier ancêtre à deux enfants — un sélecteur CSS unique se
   trompait de cible.
+- La notice « série de visionnage » est la plus découpée de toutes : le pseudo et les
+  points de chaîne vivent dans une **rangée séparée**, au-dessus du texte, et cette
+  rangée contient elle-même des `<p>` (le « + », l'icône, le nombre). Cinq lignes pour
+  une seule notice. Énumérer ces structures ne tient pas dans le temps : tout ce qui vit
+  dans le bloc de texte d'une notice est remis en ligne, avec deux exceptions déclarées
+  (le message personnalisé d'un resub, l'illustration du gift multiple).
+- Deux pièges viennent avec cette mise en ligne. D'abord, Twitch séparait ces fragments
+  par des sauts de bloc et **non par des espaces** : mis bout à bout ils se recollent
+  (« 450Série de visionnage atteinte ! »). Ensuite, une boîte rendue en ligne **ignore
+  `width` et `height`** : l'icône de points de chaîne, que Twitch dimensionnait par son
+  conteneur, repart à sa taille naturelle et fait enfler la ligne. Il faut donc restituer
+  les espaces et borner les images soi-même.
+- Le texte français de Twitch pour cette notice comporte une **espace manquante** :
+  « sur une série de 140visionnages ». C'est sa chaîne, pas notre rendu.
 - Dans les notices, Twitch enveloppe le pseudo dans des conteneurs rendus en bloc
   (`span > .chatter-name`), ce qui le pousse sur sa propre ligne au-dessus du texte.
   Le bloc texte du gift multiple est en plus une colonne flex. Les deux sont remis en
@@ -139,7 +153,10 @@ Autres constats utiles :
   citations portent donc un `aspect-ratio` mémorisé lors de leur passage dans le chat.
   Attention en banc d'essai : les badges Twitch, s'ils ne sont pas dimensionnés par la
   CSS de la fixture, produisent exactement le même décalage et font accuser le script à
-  tort.
+  tort. Autre piège de banc d'essai : une image dont le chargement échoue et dont l'`alt`
+  est vide n'est **pas rendue du tout** par Chrome — sa boîte vaut 0 quelle que soit la
+  hauteur imposée. Mesurer la taille d'une image exige donc de la servir pour de bon
+  (`withInlineImage`, qui retire aussi le `srcset` — il l'emporte sur `src`).
 - Les réglages actifs sont lisibles dans la liste de classes de `<html>`
   (`seventv-chat-message-style-full-width`, `seventv-chat-mention-highlight-enabled`…).
 - 7TV applique aux emotes un `style` inline `width/max-width/max-height` en `!important`.

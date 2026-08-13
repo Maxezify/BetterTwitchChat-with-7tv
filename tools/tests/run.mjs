@@ -34,7 +34,12 @@ const LINES = JSON.parse(readFileSync(resolve(HERE, 'fixtures/lines.json'), 'utf
 // PNG 1x1 : sans réseau, une image cassée se dimensionne sur son texte alternatif,
 // ce qui fausserait la vérification de la taille de l'illustration « cadeau mystère ».
 const INLINE_PNG = 'data:image/gif;base64,R0lGODlhZABkAIAAAP///wAAACH5BAEAAAAALAAAAABkAGQAAAIhhI+py+0Po5y02ouz3rz7D4biSJbmiabqyrbuC8fyTBcAOw==';
-const withInlineImage = (html) => html.replace(/src="https:\/\/static-cdn[^"]*"/g, `src="${INLINE_PNG}"`);
+// Le srcset est retiré avec : il l'emporte sur src, et son URL réseau serait refusée.
+// Une image cassée dont l'alt est vide n'est pas rendue du tout par Chrome — sa boîte
+// vaut alors 0, quelle que soit la hauteur imposée, et toute mesure serait trompeuse.
+const withInlineImage = (html) => html
+    .replace(/srcset="[^"]*"/g, '')
+    .replace(/src="https:\/\/static-cdn[^"]*"/g, `src="${INLINE_PNG}"`);
 
 const EMOTE_NAME = (LINES.emoteMessage.match(/data-emote-name="([^"]+)"/) || [])[1];
 const LONG_TEXT = `regarde ça ${EMOTE_NAME} @alice c'est un message vraiment très long qui doit s'afficher en entier sans être coupé par une ellipse au bout d'une seule ligne`;
@@ -87,8 +92,16 @@ const FIXTURE = `<!doctype html><meta charset="utf-8"><title>fixture</title>
   /* Twitch rend les conteneurs du pseudo en bloc dans les notices, ce qui le pousse
      sur sa propre ligne au-dessus du texte. Déclaré important pour que le test prouve
      que nos règles l'emportent, comme pour la taille de la citation. */
-  [data-test-selector="user-notice-line"] p > span:first-child { display: block !important; }
+  /* Visé par sa structure, comme en production : c'est l'enveloppe du pseudo qui est
+     rendue en bloc. Un "p > span:first-child" attraperait aussi le fragment en gras
+     d'un watch streak (« Série de visionnage atteinte ! »), qui lui reste en ligne —
+     la fixture inventerait alors un défaut que le script n'a pas à corriger. */
+  [data-test-selector="user-notice-line"] span:has(> .chatter-name) { display: block !important; }
   [data-test-selector="user-notice-line"] .chatter-name { display: block !important; }
+  /* En production, la couleur de chat du pseudo vient d'une classe hachée posée sur le
+     span le plus intérieur. On la reproduit : sans elle, impossible de vérifier que le
+     pseudo échappe au gris appliqué au reste de la notice. */
+  [data-test-selector="user-notice-line"] .chatter-name span span { color: rgb(0, 173, 3); }
   /* Carte de notice telle que Twitch la construit : barre de couleur à gauche,
      contenu à droite, le tout en flex. C'est ce qui rend mesurables le collage de la
      barre au bord et l'écart entre la barre et le texte. */
@@ -125,6 +138,7 @@ ${LINES.plain}
         '5e mois d\u2019abonnement',
         '60e mois d\u2019abonnement, dont 60 mois cons\u00e9cutifs'),
     resub: LINES.resub,
+    watchStreak: withInlineImage(LINES.watchStreak),
     giftMass: withInlineImage(LINES.giftMass),
     giftSingles: LINES.giftSingles,
     sysNotice: LINES.sysNotice
@@ -167,7 +181,7 @@ const addLines = (keys) => page.evaluate((ks) => {
     }
 }, keys);
 
-await addLines(['replyWithEmote', 'replyMod', 'highlightedReply', 'subPrime', 'resub', 'sysNotice', 'giftMass']);
+await addLines(['replyWithEmote', 'replyMod', 'highlightedReply', 'subPrime', 'resub', 'watchStreak', 'sysNotice', 'giftMass']);
 await page.waitForTimeout(250);
 await addLines(['giftSingles']);
 await page.waitForTimeout(300);
@@ -202,6 +216,72 @@ const r = await page.evaluate(() => {
         emoteFrom7tv: /cdn\.7tv\.app/.test((q('.btc-reply-quote .btc-reply-emote') || {}).src || ''),
         mentions: qa('.btc-reply-quote .btc-reply-mention').length,
         gradeAccent: hl ? hl.style.getPropertyValue('--btc-reply-accent') : '',
+        // Notice « série de visionnage » : Twitch y place le pseudo et les points de
+        // chaîne dans un bloc, au-dessus du texte. Tout doit tenir sur un flux continu.
+        watchStreak: (() => {
+            const notice = qa('.btc-notice-line').find(n => /visionnage/i.test(n.textContent));
+            if (!notice) return null;
+            const nom = notice.querySelector('.chatter-name');
+            const p = [...notice.querySelectorAll('p')].find(el => /actuellement/i.test(el.textContent));
+            if (!nom || !p) return null;
+            const rg = document.createRange();
+            rg.selectNodeContents(p);
+            const premiereLigne = [...rg.getClientRects()].filter(x => x.height > 0)[0];
+            const rn = nom.getBoundingClientRect();
+            return {
+                pseudoEtTexteSurUneLigne: !!premiereLigne
+                    && Math.abs(premiereLigne.top - rn.top) <= 2,
+                hauteur: Math.round(notice.getBoundingClientRect().height),
+                couleur: getComputedStyle(p).color,
+                taille: getComputedStyle(p).fontSize,
+                // Le pseudo doit échapper au gris : c'est lui qui identifie la notice.
+                // Twitch pose sa couleur sur le span le plus intérieur, celui qui porte
+                // le texte — viser un intermédiaire mesurerait la couleur héritée.
+                couleurPseudo: (() => {
+                    let el = nom;
+                    while (el.firstElementChild) el = el.firstElementChild;
+                    return getComputedStyle(el).color;
+                })(),
+                // Twitch séparait ces fragments par des sauts de bloc, pas par des
+                // espaces. Mis en ligne, ils se recollaient (« 450Série de visionnage »).
+                // Mesuré en pixels entre le bord droit d'un fragment et le bord gauche
+                // du suivant : le contenu d'un ::after n'apparaît dans aucun textContent.
+                ecarts: (() => {
+                    const bord = (el, cote) => {
+                        const rg2 = document.createRange();
+                        rg2.selectNodeContents(el);
+                        const rects = [...rg2.getClientRects()].filter(x => x.height > 0);
+                        if (!rects.length) return null;
+                        return cote === 'droite' ? rects[rects.length - 1].right : rects[0].left;
+                    };
+                    const ps = [...notice.querySelectorAll('p')];
+                    const points = ps.find(el => el.textContent.trim() === '450');
+                    const plus = ps.find(el => el.textContent.trim() === '+');
+                    return {
+                        apresPseudo: plus && bord(plus, 'gauche') !== null
+                            ? Math.round(bord(plus, 'gauche') - bord(nom, 'droite')) : null,
+                        apresPoints: points && bord(p, 'gauche') !== null
+                            ? Math.round(bord(p, 'gauche') - bord(points, 'droite')) : null
+                    };
+                })(),
+                // Une boîte rendue en ligne ignore width/height : l'icône de points de
+                // chaîne repartait à sa taille naturelle et faisait enfler la ligne.
+                hauteurIcone: (() => {
+                    const img = notice.querySelector('img');
+                    return img ? Math.round(img.getBoundingClientRect().height) : null;
+                })(),
+                // Nombre de lignes visuelles occupées par la notice.
+                lignes: (() => {
+                    const rg2 = document.createRange();
+                    rg2.selectNodeContents(notice);
+                    const hauts = new Set();
+                    for (const x of rg2.getClientRects()) {
+                        if (x.height > 0) hauts.add(Math.round(x.top / 4));
+                    }
+                    return hauts.size;
+                })()
+            };
+        })(),
         etiquettesHighlight: qa('[data-seventv-custom-highlight-label]').length,
         // 7TV réserve 1.3rem au-dessus pour son étiquette, 0.75rem en dessous.
         espacesHighlight: hl
@@ -422,7 +502,24 @@ check('emote servie par le CDN 7TV', r.emoteFrom7tv, true);
 check('mention mise en valeur', r.mentions, 1);
 
 // --- 3. notices compactées + regroupement des gifts ---
-check('notices compactées', r.noticeFontSize, '12.5px');
+// Comparé à la taille réellement rendue de la citation, pas à une valeur recopiée :
+// c'est la ressemblance entre les deux qui est demandée, et elle doit survivre à un
+// changement de `reply.fontScale`.
+check('notices à la taille du texte cité', r.noticeFontSize, (v) => v === r.fontSize);
+check('série de visionnage : pseudo et texte sur la même ligne',
+    r.watchStreak, (v) => v && v.pseudoEtTexteSurUneLigne);
+check('série de visionnage : aucun bloc résiduel dans la notice',
+    r.watchStreak, (v) => v && v.lignes <= 2);
+check('série de visionnage : texte à la couleur du texte cité',
+    r.watchStreak, (v) => v && v.couleur === r.color);
+check('série de visionnage : le pseudo garde sa couleur',
+    r.watchStreak, (v) => v && v.couleurPseudo === 'rgb(0, 173, 3)');
+check('série de visionnage : espace entre le pseudo et les points',
+    r.watchStreak, (v) => v && v.ecarts.apresPseudo >= 2);
+check('série de visionnage : espace entre les points et le texte',
+    r.watchStreak, (v) => v && v.ecarts.apresPoints >= 2);
+check('série de visionnage : icône de points bornée sur l\'interligne',
+    r.watchStreak, (v) => v && v.hauteurIcone > 0 && v.hauteurIcone <= 20);
 check('message de resub à taille normale', r.resubCustomFontSize, '14px');
 check('illustration cadeau réduite', r.massImgWidth, '26px');
 check('gifts individuels masqués', r.giftHidden, 3);
