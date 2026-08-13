@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-85 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+87 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -97,13 +97,33 @@ Autres constats utiles :
   ni la classe ni la variable et n'a aucun effet.
 - 7TV trace déjà ses propres séparateurs entre messages
   (`seventv-chat-lines-separator-twitch`) : en ajouter doublait le trait.
-- Sa bordure de highlight fait 2 px, et elle s'**additionne** à tout filet posé par-dessus :
-  un `box-shadow` interne de 2 px sur une ligne déjà bordée donne 4 px visibles, soit un
-  trait deux fois trop épais sur les messages de grade. Le filet doit donc être retiré là
-  où 7TV en trace déjà un — et cette présence se **mesure** (`borderLeftWidth` du style
-  calculé), elle ne se déduit pas des variables inline : le highlight « premier message »
-  (`seventv-chat-message-first-highlight`) dessine sa bordure depuis la feuille de style,
-  sans poser aucune variable.
+- La règle qui peint un message relevé par une règle « Custom Highlights », relevée dans
+  la feuille injectée par l'extension :
+
+  ```css
+  :is([data-a-target="chat-line-message"], .room-message,
+      .seventv-ffz-compat-active .chat-line__message).seventv-chat-message-custom-highlight:not(.chat-line--inline):not(.seventv-chat-message-mention-highlight):not(…7 autres :not…) {
+      background-color: var(--seventv-chat-custom-highlight-bg);
+      padding-top: 1.3rem;
+      padding-bottom: 0.75rem;
+      border-inline-start: .25rem solid var(--seventv-chat-custom-highlight-border-color, var(--seventv-chat-custom-highlight-color));
+      border-inline-end:   .25rem solid var(--seventv-chat-custom-highlight-border-color, var(--seventv-chat-custom-highlight-color));
+  }
+  ```
+
+  Quatre choses à en retenir. Sa spécificité est de **(0,10,0)** — un `:is()` plus huit
+  `:not()` — mais elle n'est **pas** `!important` : une déclaration `!important` de notre
+  côté l'emporte sans avoir à rivaliser de sélecteur, et c'est ce qui permet de ramener
+  le `padding-top` au niveau du bas. Le `1.3rem` du haut n'a rien d'esthétique : il loge
+  l'étiquette de règle. La bordure est déclarée en **`.25rem`**, pas en pixels — sa valeur
+  en pixels dépend donc de la taille de police racine, ne jamais la coder en dur. Et elle
+  est posée des **deux côtés**, `inline-start` comme `inline-end`.
+- Cette bordure s'**additionne** à tout filet posé par-dessus : un `box-shadow` interne
+  sur une ligne déjà bordée donne un trait d'apparence double sur les messages de grade.
+  Le filet doit donc être retiré là où 7TV en trace déjà un — et cette présence se
+  **mesure** (`borderLeftWidth` du style calculé), elle ne se déduit pas des variables
+  inline : le highlight « premier message » (`seventv-chat-message-first-highlight`)
+  dessine sa bordure depuis la feuille de style, sans poser aucune variable.
 - Le défilement du chat est porté par `.scrollable-area[data-a-target="chat-scroller"]`,
   **au-dessus** du conteneur de messages. Ancre déclarée et non devinée : 7TV stylise
   lui-même la scrollbar de ce sélecteur

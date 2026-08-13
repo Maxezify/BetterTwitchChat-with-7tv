@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.11.0
+// @version      15.12.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -46,7 +46,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.11.0';
+    const VERSION = '15.12.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -89,8 +89,10 @@
             // Volontairement calé sous l'interligne : une emote plus haute ferait
             // grandir la première ligne et désalignerait la bulle.
             emoteHeight: '1.3em',
-            // Épaisseur du filet de grade. Calée sur celle de 7TV (2 px) pour que les
-            // deux barres aient la même allure quand elles se superposent.
+            // Épaisseur du filet posé sur les réponses que 7TV ne colore pas. Là où il
+            // en trace un, le nôtre s'efface : les deux s'additionneraient. Le sien est
+            // déclaré en `.25rem`, donc sa valeur en pixels dépend de la police racine ;
+            // 2 px est le réglage retenu à l'œil, à ajuster si le sien paraît différent.
             accentWidth: '2px',
             accentFallback: 'hsla(0, 0%, 100%, 0.4)'
         },
@@ -123,6 +125,10 @@
         // et masquer les pseudo-éléments de la ligne emporterait aussi le séparateur
         // que 7TV y dessine. La couleur de grade, elle, n'est pas touchée.
         hideHighlightLabel: true,
+        // Espace au-dessus des messages relevés par une règle « Custom Highlights ».
+        // 7TV y réserve 1.3rem pour son étiquette et n'en met que 0.75rem en dessous ;
+        // l'étiquette partie, l'espace est vide. Mettre null pour laisser 7TV décider.
+        highlightPaddingTop: '0.75rem',
         // Traduit en français les notices que Twitch laisse en anglais et les notices
         // système de 7TV (celles-ci sont toujours en anglais). Sans effet si ton
         // interface Twitch est déjà en français.
@@ -496,6 +502,18 @@
         .seventv-system-notice-line {
             border-bottom: 1px solid hsla(0, 0%, 100%, 0.08) !important;
             padding-bottom: 4px !important;
+        }
+        ` : ''}
+
+        /* ---------- Espace au-dessus des messages relevés par 7TV ---------- */
+        /* 7TV réserve 1.3rem au-dessus de ces messages pour y poser son étiquette de
+           règle, contre 0.75rem en dessous. L'étiquette retirée, ce déséquilibre ne
+           correspond plus à rien. Sa règle a une spécificité de (0,10,0) — un :is()
+           suivi de huit :not() — mais elle n'est pas !important : la nôtre l'emporte
+           donc sans avoir à rivaliser de sélecteur. */
+        ${CONFIG.highlightPaddingTop ? `
+        .seventv-chat-message-custom-highlight {
+            padding-top: ${CONFIG.highlightPaddingTop} !important;
         }
         ` : ''}
 

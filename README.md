@@ -55,6 +55,7 @@ compact.giftWindowMs   // délai d'attente des gifts individuels
 
 separators   // trait de séparation entre les messages (désactivé : 7TV en pose un)
 hideHighlightLabel // retire l'étiquette des règles « Custom Highlights » de 7TV
+highlightPaddingTop // espace au-dessus des messages relevés par une de ces règles
 translate    // traduit les notices restées en anglais
 debug        // journalise les détections dans la console
 ```
@@ -90,7 +91,7 @@ dans l'`aria-label` de la ligne, et nous n'avons pas su y trouver la citation.
 
 | Valeur | Rendu |
 |---|---|
-| `rail` *(défaut retenu)* | La citation fait corps avec le message : aucun cadre, aucun fond propre. Un filet vertical de 2 px — la même épaisseur que celui de 7TV — court le long de l'ensemble, en gris neutre, donc toutes les réponses sont marquées. Là où 7TV trace déjà sa barre de grade (modo, VIP, premier message), le filet s'efface au lieu de s'y ajouter : la barre garde la même épaisseur partout. |
+| `rail` *(défaut retenu)* | La citation fait corps avec le message : aucun cadre, aucun fond propre. Un filet vertical de 2 px (`reply.accentWidth`) court le long de l'ensemble, en gris neutre, donc toutes les réponses sont marquées. Là où 7TV trace déjà sa barre de grade (modo, VIP, premier message), le filet s'efface au lieu de s'y ajouter : la barre garde la même épaisseur partout. |
 | `inline` | Identique, mais sans filet neutre : seule la couleur posée par 7TV apparaît. Les réponses de gens sans grade ne se distinguent que par leur fond éclairci. Équivaut à `rail` avec `accentFallback: 'transparent'`. |
 | `card` | La citation est un bloc détaché avec son propre fond et sa bordure. |
 
@@ -112,10 +113,14 @@ rendu : la règle qui l'affiche vit dans une feuille de style d'extension illisi
 la page, et masquer les pseudo-éléments de la ligne emporterait aussi le séparateur que
 7TV y dessine. La couleur de grade, elle, n'est pas touchée.
 
+Cette étiquette avait sa place réservée : 7TV met `1.3rem` d'espace au-dessus de ces
+messages contre `0.75rem` en dessous. L'étiquette partie, le script ramène le haut à
+`0.75rem` (`highlightPaddingTop`, `null` pour laisser 7TV décider).
+
 Le script ne code en dur aucune couleur de grade et n'en repeint aucune. Une fois la
-règle créée, 7TV trace lui-même une bordure de 2 px sur la ligne : le script la mesure
-et retire son propre filet, sinon les deux s'additionneraient et le trait paraîtrait
-deux fois trop épais. C'est bien la mesure du style calculé qui décide, pas la lecture
+règle créée, 7TV trace lui-même une bordure sur la ligne (déclarée en `.25rem`, donc
+dépendante de la taille de police racine) : le script la mesure et retire son propre
+filet, sinon les deux s'additionneraient et le trait paraîtrait deux fois trop épais. C'est bien la mesure du style calculé qui décide, pas la lecture
 des variables `--seventv-chat-custom-highlight-*` — le highlight « premier message »
 dessine sa bordure sans en poser aucune. Les variables ne servent qu'à teinter le filet
 dans les cas résiduels où 7TV colore sans border.
@@ -137,7 +142,7 @@ styled-components changeant à chaque build de Twitch.
 
 - [`tools/7tv-dom-recorder.user.js`](tools/7tv-dom-recorder.user.js) — capture la
   structure réelle du chat pour diagnostiquer une future casse.
-- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 85 vérifications du script contre du
+- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 87 vérifications du script contre du
   DOM Twitch réellement capturé, exécutées dans Chromium.
 
 Voir [`tools/README.md`](tools/README.md).

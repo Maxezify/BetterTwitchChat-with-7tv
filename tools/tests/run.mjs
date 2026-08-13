@@ -69,8 +69,13 @@ const FIXTURE = `<!doctype html><meta charset="utf-8"><title>fixture</title>
   .chat-line__message-container > div:first-child > div { display: flex; align-items: center; gap: 4px; }
   .tw-svg { display: block; }
   /* Couleurs de highlight telles que 7TV les applique. */
-  .seventv-chat-message-custom-highlight {
+  /* Règle réelle de 7TV, relevée dans sa feuille injectée. Sa spécificité vient d'un
+     :is() suivi de huit :not() — (0,10,0) — et elle n'est pas !important. Le padding
+     haut y est presque le double du bas : 7TV y loge son étiquette de règle. */
+  :is([data-a-target="chat-line-message"], .room-message).seventv-chat-message-custom-highlight:not(.chat-line--inline):not(.seventv-chat-message-mention-highlight):not(.seventv-chat-message-reply-highlight):not(.seventv-chat-message-monitored-highlight):not(.seventv-chat-message-restricted-highlight):not(.seventv-chat-message-raider-highlight):not(.seventv-chat-message-first-highlight):not(.seventv-chat-message-usercard-open-highlight) {
     background: var(--seventv-chat-custom-highlight-bg);
+    padding-top: 1.3rem;
+    padding-bottom: 0.75rem;
     border-left: 2px solid var(--seventv-chat-custom-highlight-border-color); }
   .seventv-chat-message-first-highlight  { background: rgba(205,56,205,.153); border-left: 2px solid rgb(205,56,205); }
   /* Étiquette de règle « Custom Highlights ». La vraie règle vit dans une feuille de
@@ -198,6 +203,10 @@ const r = await page.evaluate(() => {
         mentions: qa('.btc-reply-quote .btc-reply-mention').length,
         gradeAccent: hl ? hl.style.getPropertyValue('--btc-reply-accent') : '',
         etiquettesHighlight: qa('[data-seventv-custom-highlight-label]').length,
+        // 7TV réserve 1.3rem au-dessus pour son étiquette, 0.75rem en dessous.
+        espacesHighlight: hl
+            ? { haut: getComputedStyle(hl).paddingTop, bas: getComputedStyle(hl).paddingBottom }
+            : null,
         // Ce que la ligne de grade affiche réellement en fin de ligne.
         etiquetteRendue: hl ? getComputedStyle(hl, '::after').content : null,
         // Style « rail » : la citation n'a plus de cadre propre, l'accent est porté
@@ -425,6 +434,10 @@ check('notice système 7TV traduite', r.sysNoticeText, 'timedout_user a été ex
 check('accent de grade lu depuis la variable 7TV', r.gradeAccent, '#55E800');
 check('étiquette de règle 7TV retirée du DOM', r.etiquettesHighlight, 0);
 check('étiquette de règle 7TV plus affichée', r.etiquetteRendue, (v) => v === 'none' || v === '""');
+check('espace au-dessus d\'un message de grade ramené à 0.75rem',
+    r.espacesHighlight, (v) => v && v.haut === '12px');
+check('espaces haut et bas symétriques sur un message de grade',
+    r.espacesHighlight, (v) => v && v.haut === v.bas);
 // 7TV trace déjà sa barre sur cette ligne : nous ne devons rien ajouter par-dessus.
 check('pas d\'ombre ajoutée sur une ligne colorée par 7TV', r.lineBoxShadow, 'none');
 check('pseudo cité non coloré par défaut', r.quotedNameColored, '');
