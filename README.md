@@ -12,6 +12,7 @@ Userscript Tampermonkey qui rend le chat de Twitch plus lisible, compatible avec
 | **Citation discrète** | Police à 78 % du texte du chat, gris uni, pseudos soulignés, bulle calée sur la première ligne. Le « @pseudo » cité peut reprendre sa couleur de chat (`reply.colorQuotedName`), désactivé par défaut car trop voyant. |
 | **Emotes dans les citations** | Twitch ne met que du texte brut dans la citation. Le script indexe les emotes (7TV et Twitch) qui passent dans le chat et les réaffiche dans les réponses. |
 | **Notices compactées** | Subs, Primes, resubs, gifts, raids et séries de visionnage prennent la typographie du texte cité — même taille, même gris — et ne forment plus qu'un seul paragraphe. Tout ce que Twitch y range en bloc revient dans le flux : le pseudo, mais aussi la rangée « pseudo + points de chaîne » d'une série de visionnage, qui occupait cinq lignes à elle seule. Seul le pseudo garde sa couleur. L'illustration « cadeau mystère » de 96 px devient une vignette de 26 px. |
+| **Message d'abonnement** | Le message écrit par la personne qui s'abonne est une ligne de chat complète imbriquée dans la notice, que Twitch rend à sa taille normale : il ressortait comme un corps étranger. Il prend la même typographie que la citation — ce sont, comme elle, les mots de quelqu'un d'autre — mais garde son propre bloc, pour qu'on sache toujours qui parle. |
 | **Gifts multiples regroupés** | « X offre 50 abonnements » absorbe les « X a offert un abonnement à Y » qui suivent et affiche la liste des destinataires sur une seule notice. |
 | **Chat toujours collé en bas** | Dérouler une citation agrandit le message *après* que Twitch a fait défiler : le bas du nouveau message passait sous le pli. Le script remet le chat au bas une fois la ligne à sa taille définitive — et seulement si le chat y était déjà, pour ne jamais interrompre une lecture en cours dans l'historique. |
 | **Couleurs de grade 7TV** | Si 7TV colore un message (highlight par badge modo/VIP, first-time chatter, règle personnalisée), sa barre de couleur est laissée telle quelle : le script n'en superpose pas une seconde, qui doublerait l'épaisseur du trait. |
@@ -144,7 +145,7 @@ styled-components changeant à chaque build de Twitch.
 
 - [`tools/7tv-dom-recorder.user.js`](tools/7tv-dom-recorder.user.js) — capture la
   structure réelle du chat pour diagnostiquer une future casse.
-- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 94 vérifications du script contre du
+- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 100 vérifications du script contre du
   DOM Twitch réellement capturé, exécutées dans Chromium.
 
 Voir [`tools/README.md`](tools/README.md).

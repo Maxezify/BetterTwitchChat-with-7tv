@@ -137,7 +137,9 @@ ${LINES.plain}
     subPrime: LINES.subPrime.replace(
         '5e mois d\u2019abonnement',
         '60e mois d\u2019abonnement, dont 60 mois cons\u00e9cutifs'),
-    resub: LINES.resub,
+    // Images servies pour de bon : un badge dont le chargement échoue est rendu comme
+    // son texte alternatif, et sa boîte cesse de suivre la taille qu'on lui impose.
+    resub: withInlineImage(LINES.resub),
     watchStreak: withInlineImage(LINES.watchStreak),
     giftMass: withInlineImage(LINES.giftMass),
     giftSingles: LINES.giftSingles,
@@ -271,17 +273,28 @@ const r = await page.evaluate(() => {
                     return img ? Math.round(img.getBoundingClientRect().height) : null;
                 })(),
                 // Nombre de lignes visuelles occupées par la notice.
+                // Regroupées par proximité et non par une grille absolue : découper la
+                // position en tranches fixes rendait le compte dépendant de l'endroit
+                // de la page où tombe la notice, donc de la hauteur de celles d'avant.
                 lignes: (() => {
                     const rg2 = document.createRange();
                     rg2.selectNodeContents(notice);
-                    const hauts = new Set();
-                    for (const x of rg2.getClientRects()) {
-                        if (x.height > 0) hauts.add(Math.round(x.top / 4));
-                    }
-                    return hauts.size;
+                    const hauts = [...rg2.getClientRects()]
+                        .filter(x => x.height > 0).map(x => x.top).sort((a, b) => a - b);
+                    let n = 0;
+                    let ref = -Infinity;
+                    for (const t of hauts) { if (t - ref > 4) { n++; ref = t; } }
+                    return n;
                 })()
             };
         })(),
+        // Toutes les notices doivent porter la même couleur, y compris le gift multiple
+        // — qui n'a pas d'icône SVG, donc pas de bloc de texte étiqueté.
+        couleursNotices: qa('.btc-notice-line').map((n) => {
+            const t = [...n.querySelectorAll('p,span')]
+                .find(x => x.textContent.trim().length > 20) || n;
+            return getComputedStyle(t).color;
+        }),
         etiquettesHighlight: qa('[data-seventv-custom-highlight-label]').length,
         // 7TV réserve 1.3rem au-dessus pour son étiquette, 0.75rem en dessous.
         espacesHighlight: hl
@@ -444,6 +457,27 @@ const r = await page.evaluate(() => {
         }).filter(v => v !== null),
         noticeFontSize: noticeLine ? getComputedStyle(noticeLine).fontSize : '',
         resubCustomFontSize: resubCustom ? getComputedStyle(resubCustom).fontSize : '',
+        // Le message d'un resub prend le gris de la citation, sauf le pseudo : Twitch
+        // pose sa couleur en style inline, qu'un !important de notre côté écraserait.
+        resubCustomColor: resubCustom
+            ? getComputedStyle(resubCustom.querySelector('.text-fragment') || resubCustom).color : '',
+        resubPseudoColor: resubCustom && resubCustom.querySelector('.chat-author__display-name')
+            ? getComputedStyle(resubCustom.querySelector('.chat-author__display-name')).color : '',
+        // La ligne imbriquée porte le remplissage d'un message de chat : 20 px de côté
+        // qui décalent le texte à l'intérieur de la notice.
+        resubCustomPadding: resubCustom && resubCustom.querySelector('.chat-line__message')
+            ? getComputedStyle(resubCustom.querySelector('.chat-line__message')).paddingLeft : '',
+        // Le badge vit dans un <button>, dont la feuille par défaut du navigateur fixe
+        // la police à 13.33px sans héritage : un em s'y résout sur cette taille-là.
+        resubBadge: (() => {
+            const b = resubCustom && resubCustom.querySelector('.chat-badge');
+            if (!b) return null;
+            return {
+                hauteur: Math.round(b.getBoundingClientRect().height * 10) / 10,
+                police: getComputedStyle(b).fontSize,
+                interligne: getComputedStyle(resubCustom).lineHeight
+            };
+        })(),
         massImgWidth: massImg ? getComputedStyle(massImg).width : '',
         giftRecipients: giftList ? [...giftList.querySelectorAll('.btc-gift-recipient')].map(e => e.textContent) : [],
         giftHidden: qa('.btc-hidden').length,
@@ -520,7 +554,21 @@ check('série de visionnage : espace entre les points et le texte',
     r.watchStreak, (v) => v && v.ecarts.apresPoints >= 2);
 check('série de visionnage : icône de points bornée sur l\'interligne',
     r.watchStreak, (v) => v && v.hauteurIcone > 0 && v.hauteurIcone <= 20);
-check('message de resub à taille normale', r.resubCustomFontSize, '14px');
+// Comparé à la taille rendue de la notice qui l'entoure, pas à une valeur recopiée :
+// c'est l'uniformité qui est demandée, et elle doit survivre à un changement de réglage.
+check('message de resub à la taille de la notice',
+    r.resubCustomFontSize, (v) => v === r.noticeFontSize);
+check('message de resub à la couleur du texte cité', r.resubCustomColor, r.color);
+check('toutes les notices à la couleur du texte cité, gift multiple compris',
+    r.couleursNotices, (v) => v.length >= 5 && v.every(c => c === r.color));
+check('message de resub : le pseudo garde sa couleur',
+    r.resubPseudoColor, (v) => v && v !== r.color);
+check('message de resub sans le remplissage d\'une ligne de chat',
+    r.resubCustomPadding, '0px');
+check('message de resub : la police du <button> ne casse plus l\'héritage',
+    r.resubBadge, (v) => v && v.police === r.noticeFontSize);
+check('message de resub : badge à l\'échelle de l\'interligne',
+    r.resubBadge, (v) => v && Math.abs(v.hauteur - parseFloat(v.interligne)) <= 1);
 check('illustration cadeau réduite', r.massImgWidth, '26px');
 check('gifts individuels masqués', r.giftHidden, 3);
 check('destinataires regroupés', r.giftRecipients.join(','), 'recipient_one,recipient_two,recipient_three');

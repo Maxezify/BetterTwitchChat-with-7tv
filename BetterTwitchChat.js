@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.13.0
+// @version      15.14.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -46,7 +46,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.13.0';
+    const VERSION = '15.14.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -413,11 +413,28 @@
             width: ${c.iconSize} !important;
             height: ${c.iconSize} !important;
         }
-        /* Le message personnalisé d'un resub reste à taille normale. */
+        /* Le message écrit par la personne qui se réabonne est une ligne de chat
+           complète, imbriquée dans la notice et rendue par Twitch à sa taille normale.
+           Il vit hors du bloc de texte de la notice : aucune des règles de mise en
+           ligne ne l'atteint, et il ressortait comme un corps étranger au milieu d'une
+           notice à la taille d'une citation. Il prend donc la même typographie — ce
+           sont, comme une citation, les mots de quelqu'un d'autre — mais garde son
+           propre bloc : c'est du texte libre, le fondre dans la phrase de Twitch
+           brouillerait qui parle.
+
+           On hérite de la taille au lieu de réappliquer l'expression de la citation :
+           celle-ci est relative au
+           em du parent, et le parent est déjà réduit — la réappliquer ici réduirait une
+           seconde fois. */
         ${NL} ${SEL.resubCustom} {
-            font-size: 14px !important;
-            line-height: 1.5 !important;
+            font-size: ${c.quoteLook ? 'inherit' : '14px'} !important;
+            line-height: ${c.quoteLook ? c.lineHeight : '1.5'} !important;
             margin-top: 2px !important;
+        }
+        /* La ligne imbriquée porte le remplissage d'un message de chat : dans une
+           notice, ces 20 px de côté décalent le texte sans rien apporter. */
+        ${NL} ${SEL.resubCustom} .chat-line__message {
+            padding: 0 !important;
         }
         ${NL} ${SEL.resubCustom} svg {
             width: auto !important;
@@ -528,10 +545,29 @@
            pour rester une information secondaire. Le pseudo est exclu — c'est lui qui
            permet de reconnaître la notice d'un coup d'œil, il garde sa couleur. */
         ${c.quoteLook ? `
-        ${NL} .btc-notice-text,
-        ${NL} .btc-notice-text p,
-        ${NL} .btc-notice-text span:not(.chatter-name):not(.chatter-name *) {
+        /* Visé sur la ligne de notice entière et non sur son bloc de texte : ce bloc
+           n'est étiqueté qu'à partir de l'icône SVG, et un gift multiple n'en a pas —
+           il restait blanc au milieu de notices grises.
+           Les pseudos sont exclus : ce sont eux qui permettent de reconnaître la notice
+           d'un coup d'œil. Leur couleur est posée en style inline par Twitch, qu'un
+           !important de notre côté écraserait sans cette exception. */
+        ${NL},
+        ${NL} p:not(${SEL.massGiftName}),
+        ${NL} span:not(.chatter-name):not(.chatter-name *):not(${SEL.username}):not(${SEL.username} *) {
             color: var(--btc-reply-color) !important;
+        }
+        /* Twitch enveloppe pseudo et badges dans un <button>, et la feuille par défaut
+           du navigateur y impose 13.33px sans héritage. Tout ce qui s'exprime en em à
+           l'intérieur se résout donc sur cette taille-là et non sur celle de la notice.
+           On rétablit l'héritage sur tout le sous-arbre avant de dimensionner quoi que
+           ce soit en em. */
+        ${NL} ${SEL.resubCustom} * {
+            font-size: inherit !important;
+        }
+        /* Badges remis à l'échelle du texte réduit. */
+        ${NL} ${SEL.resubCustom} .chat-badge {
+            height: calc(${c.lineHeight} * 1em) !important;
+            width: auto !important;
         }
         ` : ''}
         ` : ''}
