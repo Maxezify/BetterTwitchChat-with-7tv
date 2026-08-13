@@ -244,6 +244,7 @@ const r = await page.evaluate(() => {
                 pseudoEtTexteSurUneLigne: !!premiereLigne
                     && Math.abs(premiereLigne.top - rn.top) <= 2,
                 hauteur: Math.round(notice.getBoundingClientRect().height),
+                texte: notice.textContent,
                 couleur: getComputedStyle(p).color,
                 taille: getComputedStyle(p).fontSize,
                 // Le pseudo doit échapper au gris : c'est lui qui identifie la notice.
@@ -644,6 +645,9 @@ check('badge du message aligné au pixel sur le texte de la notice',
     r.alignementBadge, (v) => v !== null && Math.abs(v) <= 0.5);
 check('icône centrée sur chaque notice, message d\'abonnement compris',
     r.decalagesIcones, (v) => v.length >= 3 && v.every(d => Math.abs(d) <= 1));
+// Défaut de la chaîne française de Twitch, pas du rendu.
+check('espace rétabli entre le nombre et « visionnages »',
+    r.watchStreak, (v) => v && /\b140 visionnages\b/.test(v.texte) && !/\d\S*visionnages/.test(v.texte));
 check('notice teintée de la couleur de sa barre',
     r.fondNoticeAbonnement, (v) => /rgba\(250,\s*41,\s*41,\s*0\.15\)/.test(v));
 check('série de visionnage teintée de la couleur de la chaîne malgré sa barre neutre',
@@ -715,6 +719,68 @@ const apresHighlight = await page.evaluate(() => {
 check('pas d\'accent sans highlight', accentBefore, '');
 check('accent capté quand 7TV colore après coup', apresHighlight.accent, '#E005B9');
 check('étiquette retirée quand 7TV la pose après coup', apresHighlight.etiquette, false);
+
+// --- message joint à une annonce autre qu'un abonnement ---
+// Une série de visionnage peut elle aussi porter un message, et son enveloppe n'a pas le
+// data-a-target d'un message d'abonnement. Les règles accrochées à ce seul attribut
+// laissaient alors le <button> de Twitch décaler badges et pseudo de 8 px. On greffe la
+// ligne de chat réellement capturée dans une enveloppe anonyme : le DOM du message n'est
+// pas inventé, seule l'absence d'attribut connu l'est — c'est précisément le risque.
+await page.evaluate(() => {
+    const source = document.querySelector(
+        '[data-a-target="chat-resubscription-message__custom-message"] .chat-line__message');
+    const notice = [...document.querySelectorAll('.btc-notice-line')]
+        .find(x => /visionnage/i.test(x.textContent));
+    const enveloppe = document.createElement('div');   // ni classe ni data-a-target
+    enveloppe.id = 'msg-streak';
+    enveloppe.appendChild(source.cloneNode(true));
+    notice.appendChild(enveloppe);
+});
+await page.waitForTimeout(250);
+const messageSurStreak = await page.evaluate(() => {
+    const notice = [...document.querySelectorAll('.btc-notice-line')]
+        .find(x => /visionnage/i.test(x.textContent));
+    const msg = document.querySelector('#msg-streak');
+    const g = (x) => (x ? Math.round(x.getBoundingClientRect().left * 10) / 10 : null);
+    const ic = notice.querySelector('.btc-notice-icon');
+    const a = ic.getBoundingClientRect();
+    const b = notice.getBoundingClientRect();
+    const fragment = msg.querySelector('.text-fragment') || msg;
+    return {
+        texte: g(notice.querySelector('.btc-notice-text')),
+        badge: g(msg.querySelector('.chat-badge')),
+        pseudo: g(msg.querySelector('.chat-author__display-name')),
+        taille: getComputedStyle(fragment).fontSize,
+        decalageIcone: Math.round(((a.top + a.height / 2) - (b.top + b.height / 2)) * 10) / 10
+    };
+});
+check('message sur une série de visionnage : badge aligné sur le texte',
+    messageSurStreak, (v) => v.badge !== null && Math.abs(v.badge - v.texte) <= 0.5);
+check('message sur une série de visionnage : pseudo aligné sur le texte',
+    messageSurStreak, (v) => v.pseudo !== null && Math.abs(v.pseudo - v.texte) <= 0.5);
+check('message sur une série de visionnage : icône toujours centrée',
+    messageSurStreak, (v) => Math.abs(v.decalageIcone) <= 1);
+check('message sur une série de visionnage : à la taille de la notice',
+    messageSurStreak, (v) => v.taille === r.noticeFontSize);
+
+// Toutes les notices n'ont pas de barre de couleur exploitable. Elles doivent malgré
+// tout porter la couleur de la chaîne : c'est « toute annonce » qui est demandé, pas
+// « toute annonce qui en déclare une ». On retire la barre d'une notice réelle.
+const teinteSansBarre = await page.evaluate((html) => {
+    const root = document.querySelector('[data-test-selector="chat-scrollable-area__message-container"]');
+    const holder = document.createElement('div');
+    holder.innerHTML = html;
+    const carte = holder.querySelector('[data-test-selector="user-notice-line"]').parentElement;
+    carte.firstElementChild.remove();          // la barre de couleur
+    carte.id = 'sans-barre';
+    root.appendChild(holder.firstElementChild);
+    return null;
+}, LINES.watchStreak);
+await page.waitForTimeout(250);
+check('notice sans barre teintée de la couleur de la chaîne',
+    await page.evaluate(() =>
+        document.querySelector('#sans-barre').style.getPropertyValue('--btc-notice-tint')),
+    'rgba(250, 41, 41, 0.15)');
 
 // --- couleur du pseudo dans une notice ---
 // Twitch n'y met pas la couleur de chat. Une série de visionnage récompense le fait de

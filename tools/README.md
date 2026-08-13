@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-114 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+120 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -88,11 +88,16 @@ Autres constats utiles :
   conteneur, repart à sa taille naturelle et fait enfler la ligne. Il faut donc restituer
   les espaces et borner les images soi-même.
 - Le texte français de Twitch pour cette notice comporte une **espace manquante** :
-  « sur une série de 140visionnages ». C'est sa chaîne, pas notre rendu.
-- Le message écrit avec un abonnement (`chat-resubscription-message__custom-message`)
-  est une **ligne de chat complète imbriquée** dans la notice, avec son remplissage de
-  `5px 20px`. Il vit **hors** du bloc de texte étiqueté : les règles visant
-  `.btc-notice-text` ne l'atteignent pas.
+  « sur une série de 140visionnages ». C'est sa chaîne, pas notre rendu — le script la
+  répare dans la passe de traduction.
+- Le message joint à une annonce est une **ligne de chat complète imbriquée** dans la
+  notice, avec son remplissage de `5px 20px`. Il vit **hors** du bloc de texte étiqueté :
+  les règles visant `.btc-notice-text` ne l'atteignent pas. Surtout, l'enveloppe qui le
+  porte **change de `data-a-target` selon le type d'annonce** : un abonnement expose
+  `chat-resubscription-message__custom-message`, une série de visionnage non. S'accrocher
+  à cet attribut laissait donc la moitié des messages sans mise en forme — badges décalés
+  de 8 px par le bouton de Twitch. L'ancre stable est la ligne de chat imbriquée
+  elle-même.
 - Deux pièges de taille de police dans ce sous-arbre. Twitch enveloppe pseudo et badges
   dans un `<button>`, et la feuille par défaut du navigateur y impose **13.33 px sans
   héritage** : tout ce qui s'exprime en `em` à l'intérieur se résout sur cette taille-là

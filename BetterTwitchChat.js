@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.17.0
+// @version      15.18.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -46,7 +46,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.17.0';
+    const VERSION = '15.18.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -167,6 +167,11 @@
         notice: '[data-test-selector="user-notice-line"]',
         systemNotice: '[data-seventv-system-notice],.seventv-system-notice-line',
         resubCustom: '[data-a-target="chat-resubscription-message__custom-message"]',
+        // Message joint à une annonce. Twitch l'enveloppe dans un conteneur dont le
+        // data-a-target varie selon le type d'annonce — un abonnement et une série de
+        // visionnage n'ont pas le même. La ligne de chat imbriquée, elle, est toujours
+        // la même : c'est elle qu'on vise.
+        nestedMessage: '.chat-line__message',
         massGiftName: '.mystery-gift-theme__displayname',
         massGiftImage: '.mystery-gift-theme__image',
         massGiftOverlay: '.mystery-gift-theme__overlay',
@@ -220,6 +225,9 @@
         [/\bThey've gifted a total of (\d+) Subs in the channel\b/gi, 'a déjà offert $1 abonnements sur cette chaîne'],
         [/\bIt's their first Gift Sub in the channel\b/gi, 'premier abonnement offert sur cette chaîne'],
         [/\braided with a viewer count of (\d+)\b/gi, 'a lancé un raid avec $1 viewers'],
+        // Défaut de la chaîne française de Twitch, pas du rendu : « sur une série de
+        // 3visionnages ». L'espace manque entre le nombre et le mot.
+        [/(\d)(visionnages?)\b/gi, '$1 $2'],
         [/\bWatch Streak Reached!?:?\s*/gi, ''],
         [/\bis currently on a (\d+)-?stream streak\b/gi, 'est sur une série de $1 streams'],
         [/\s*!?\s*in\s+\S+'s channel\b/gi, ''],
@@ -300,6 +308,7 @@
         // doivent s'accorder dessus : celle qui l'écarte, et celle qui aligne le message
         // d'abonnement sur ce même bord.
         const NOTICE_GAP = '6px';
+        const MSG = `.btc-notice-line.btc-notice-line ${SEL.nestedMessage}`;
         const Q = 'p.btc-reply-quote.btc-reply-quote';
         const NL = '.btc-notice-line.btc-notice-line';
         const NC = '.btc-notice-card.btc-notice-card';
@@ -480,7 +489,8 @@
            celle-ci est relative au
            em du parent, et le parent est déjà réduit — la réappliquer ici réduirait une
            seconde fois. */
-        ${NL} ${SEL.resubCustom} {
+        ${NL} ${SEL.resubCustom},
+        ${MSG} {
             font-size: ${c.quoteLook ? 'inherit' : '14px'} !important;
             line-height: ${c.quoteLook ? c.lineHeight : '1.5'} !important;
             /* Aucun retrait propre : le remplissage de la notice place déjà le message
@@ -492,7 +502,7 @@
            qui décalaient les badges vers la droite par rapport au texte de l'annonce.
            On neutralise la boîte du bouton plutôt que de compter sur Twitch pour le
            faire : rien ne garantit qu'il la réinitialise sur toutes ses pages. */
-        ${NL} ${SEL.resubCustom} button {
+        ${MSG} button {
             padding: 0 !important;
             border: 0 !important;
             margin: 0 !important;
@@ -501,10 +511,10 @@
         }
         /* La ligne imbriquée porte le remplissage d'un message de chat : dans une
            notice, ces 20 px de côté décalent le texte sans rien apporter. */
-        ${NL} ${SEL.resubCustom} .chat-line__message {
+        ${MSG} {
             padding: 0 !important;
         }
-        ${NL} ${SEL.resubCustom} svg {
+        ${MSG} svg {
             width: auto !important;
             height: auto !important;
         }
@@ -566,9 +576,9 @@
            personne, garde son propre bloc. Le :not() le retire de la sélection et,
            accessoirement, porte la spécificité de cette règle au-dessus de celle qui le
            met en forme plus bas — l'ordre des règles ne décide donc de rien ici. */
-        ${NL} .btc-notice-text div:not(:has(${SEL.resubCustom})),
-        ${NL} .btc-notice-text p:not(${SEL.resubCustom}),
-        ${NL} .btc-notice-text span:not(${SEL.resubCustom}) {
+        ${NL} .btc-notice-text div:not(:has(${SEL.nestedMessage})),
+        ${NL} .btc-notice-text p:not(${SEL.nestedMessage}),
+        ${NL} .btc-notice-text span:not(${SEL.nestedMessage}) {
             display: inline !important;
         }
 
@@ -629,11 +639,12 @@
            l'intérieur se résout donc sur cette taille-là et non sur celle de la notice.
            On rétablit l'héritage sur tout le sous-arbre avant de dimensionner quoi que
            ce soit en em. */
+        ${MSG} *,
         ${NL} ${SEL.resubCustom} * {
             font-size: inherit !important;
         }
         /* Badges remis à l'échelle du texte réduit. */
-        ${NL} ${SEL.resubCustom} .chat-badge {
+        ${MSG} .chat-badge {
             height: calc(${c.lineHeight} * 1em) !important;
             width: auto !important;
         }
@@ -836,12 +847,12 @@
         // Source exacte quand elle existe : le message joint à un abonnement porte la
         // couleur en style inline. On la préfère à l'index, qui repose sur le nom
         // affiché et peut manquer quelqu'un dont le login diffère.
-        const auteur = noticeLine.querySelector(`${SEL.resubCustom} ${SEL.username}`);
+        const auteur = noticeLine.querySelector(`${SEL.nestedMessage} ${SEL.username}`);
         const couleurJointe = auteur ? (auteur.style.color || '').trim() : '';
 
         for (const nom of noticeLine.querySelectorAll(`${SEL.chatterName},${SEL.massGiftName}`)) {
             // Le pseudo du message joint a déjà la sienne, posée par Twitch.
-            if (nom.closest(SEL.resubCustom)) continue;
+            if (nom.closest(SEL.nestedMessage)) continue;
             if (nom.classList.contains('btc-notice-name')) continue;
 
             const login = nom.textContent.trim().toLowerCase();
@@ -1189,13 +1200,30 @@
         if (!CONFIG.compact.tintOpacity) return;
         let composantes = null;
         try {
-            const m = getComputedStyle(bar).backgroundColor.match(/rgba?\(([^)]+)\)/);
-            if (!m) return;
-            const [red, green, blue, alpha] = m[1].split(',').map(v => parseFloat(v));
-            if (![red, green, blue].every(Number.isFinite)) return;
-            if (alpha === 0) return;                    // barre invisible : rien à reprendre
-            composantes = [red, green, blue];
-        } catch (e) { return; }
+            const m = bar && getComputedStyle(bar).backgroundColor.match(/rgba?\(([^)]+)\)/);
+            if (m) {
+                const [red, green, blue, alpha] = m[1].split(',').map(v => parseFloat(v));
+                // Une barre invisible ne fournit rien : on retombera sur l'accent connu.
+                if ([red, green, blue].every(Number.isFinite) && alpha !== 0) {
+                    composantes = [red, green, blue];
+                }
+            }
+        } catch (e) { /* style indisponible */ }
+
+        // Aucune barre exploitable — certaines annonces n'en ont pas du tout. Elles
+        // doivent malgré tout porter la couleur de la chaîne : c'est « toute annonce »
+        // qui est demandé, pas « toute annonce qui déclare une couleur ».
+        if (!composantes) {
+            if (!accentChaine) {
+                if (cartesNeutres.size >= CARTES_NEUTRES_MAX) {
+                    cartesNeutres.delete(cartesNeutres.values().next().value);
+                }
+                cartesNeutres.add(card);
+                return;
+            }
+            poserTeinte(card, accentChaine.split(',').map(v => parseFloat(v)));
+            return;
+        }
 
         if (!estNeutre(...composantes)) {
             const decouverte = accentChaine !== composantes.join(', ');
@@ -1235,10 +1263,10 @@
         // La barre de couleur est le frère précédent : un div vide avec un
         // background inline.
         const bar = noticeLine.previousElementSibling;
-        if (bar && !bar.childElementCount && bar.getAttribute('style')) {
-            bar.classList.add('btc-notice-bar');
-            tintNotice(card, bar);
-        }
+        const barreValide = bar && !bar.childElementCount && bar.getAttribute('style');
+        if (barreValide) bar.classList.add('btc-notice-bar');
+        // Appelé même sans barre : la notice doit être teintée dans tous les cas.
+        tintNotice(card, barreValide ? bar : null);
     };
 
     // =========================================================================

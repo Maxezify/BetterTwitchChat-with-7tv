@@ -13,8 +13,8 @@ Userscript Tampermonkey qui rend le chat de Twitch plus lisible, compatible avec
 | **Emotes dans les citations** | Twitch ne met que du texte brut dans la citation. Le script indexe les emotes (7TV et Twitch) qui passent dans le chat et les réaffiche dans les réponses. |
 | **Notices compactées** | Subs, Primes, resubs, gifts, raids et séries de visionnage prennent la typographie du texte cité — même taille, même gris — et ne forment plus qu'un seul paragraphe. Tout ce que Twitch y range en bloc revient dans le flux : le pseudo, mais aussi la rangée « pseudo + points de chaîne » d'une série de visionnage, qui occupait cinq lignes à elle seule. L'icône est sortie du flux et centrée sur la hauteur de la notice entière, message d'abonnement compris ; sa place est réservée par un retrait, si bien que tout le contenu part d'un seul et même bord gauche. L'illustration « cadeau mystère » de 96 px devient une vignette de 26 px. |
 | **Pseudo coloré dans les notices** | Twitch n'applique pas la couleur de chat au pseudo d'une notice : il sort dans la couleur du texte et se noie une fois la notice grisée. Le script la repose depuis les messages vus passer. Une série de visionnage récompensant le fait de regarder et non d'écrire, la personne n'a souvent jamais parlé quand la notice tombe : le pseudo est alors recoloré après coup, dès son premier message. En attendant, il garde la couleur de texte de Twitch plutôt que le gris. |
-| **Message d'abonnement** | Le message écrit par la personne qui s'abonne est une ligne de chat complète imbriquée dans la notice, que Twitch rend à sa taille normale : il ressortait comme un corps étranger. Il prend la même typographie que la citation — ce sont, comme elle, les mots de quelqu'un d'autre — mais garde son propre bloc, pour qu'on sache toujours qui parle. Il s'aligne au pixel sur la phrase qu'il complète, badges compris — Twitch les enveloppe dans un bouton dont il ne réinitialise pas la boîte, ce qui les décalait de 8 px. |
-| **Notices teintées** | Le fond de la notice reprend la couleur de sa barre latérale, à 15 %, comme 7TV teinte les messages qu'il relève. Twitch pose la couleur d'accent de la chaîne en style inline sur cette barre pour les abonnements ; une série de visionnage n'en porte pas et retombe sur un gris de thème, alors le script réutilise la couleur de chaîne vue ailleurs — et reteinte après coup celles arrivées avant qu'elle soit connue. |
+| **Message d'abonnement** | Le message écrit par la personne qui s'abonne est une ligne de chat complète imbriquée dans la notice, que Twitch rend à sa taille normale : il ressortait comme un corps étranger. Il prend la même typographie que la citation — ce sont, comme elle, les mots de quelqu'un d'autre — mais garde son propre bloc, pour qu'on sache toujours qui parle. Il s'aligne au pixel sur la phrase qu'il complète, badges compris — Twitch les enveloppe dans un bouton dont il ne réinitialise pas la boîte, ce qui les décalait de 8 px. Le traitement vise la ligne de chat imbriquée et non l'attribut de son enveloppe, qui change selon le type d'annonce : un message joint à une série de visionnage est traité comme celui d'un abonnement. |
+| **Notices teintées** | Le fond de la notice reprend la couleur de sa barre latérale, à 15 %, comme 7TV teinte les messages qu'il relève. Twitch pose la couleur d'accent de la chaîne en style inline sur cette barre pour les abonnements ; une série de visionnage n'en porte pas et retombe sur un gris de thème, alors le script réutilise la couleur de chaîne vue ailleurs — y compris pour les annonces sans barre du tout — et reteinte après coup celles arrivées avant qu'elle soit connue. |
 | **Gifts multiples regroupés** | « X offre 50 abonnements » absorbe les « X a offert un abonnement à Y » qui suivent et affiche la liste des destinataires sur une seule notice. |
 | **Chat toujours collé en bas** | Dérouler une citation agrandit le message *après* que Twitch a fait défiler : le bas du nouveau message passait sous le pli. Le script remet le chat au bas une fois la ligne à sa taille définitive — et seulement si le chat y était déjà, pour ne jamais interrompre une lecture en cours dans l'historique. |
 | **Couleurs de grade 7TV** | Si 7TV colore un message (highlight par badge modo/VIP, first-time chatter, règle personnalisée), sa barre de couleur est laissée telle quelle : le script n'en superpose pas une seconde, qui doublerait l'épaisseur du trait. |
@@ -63,7 +63,7 @@ compact.giftWindowMs   // délai d'attente des gifts individuels
 separators   // trait de séparation entre les messages (désactivé : 7TV en pose un)
 hideHighlightLabel // retire l'étiquette des règles « Custom Highlights » de 7TV
 highlightPaddingTop // espace au-dessus des messages relevés par une de ces règles
-translate    // traduit les notices restées en anglais
+translate    // traduit les notices restées en anglais et répare « 3visionnages »
 debug        // journalise les détections dans la console
 ```
 
@@ -149,7 +149,7 @@ styled-components changeant à chaque build de Twitch.
 
 - [`tools/7tv-dom-recorder.user.js`](tools/7tv-dom-recorder.user.js) — capture la
   structure réelle du chat pour diagnostiquer une future casse.
-- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 114 vérifications du script contre du
+- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 120 vérifications du script contre du
   DOM Twitch réellement capturé, exécutées dans Chromium.
 
 Voir [`tools/README.md`](tools/README.md).
