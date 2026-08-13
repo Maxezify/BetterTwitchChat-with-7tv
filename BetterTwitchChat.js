@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.10.0
+// @version      15.11.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -46,7 +46,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.10.0';
+    const VERSION = '15.11.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -116,6 +116,13 @@
         // Trait de séparation entre les messages. Désactivé : 7TV en pose déjà un
         // (classe seventv-chat-lines-separator-twitch sur <html>), le nôtre doublait.
         separators: false,
+        // Retire l'étiquette que 7TV accroche aux messages relevés par une règle
+        // « Custom Highlights » (l'emoji ou le texte donné à la règle). On enlève
+        // l'attribut qui la porte plutôt que de masquer son rendu : la règle qui
+        // l'affiche vit dans une feuille de style d'extension qu'on ne peut pas lire,
+        // et masquer les pseudo-éléments de la ligne emporterait aussi le séparateur
+        // que 7TV y dessine. La couleur de grade, elle, n'est pas touchée.
+        hideHighlightLabel: true,
         // Traduit en français les notices que Twitch laisse en anglais et les notices
         // système de 7TV (celles-ci sont toujours en anglais). Sans effet si ton
         // interface Twitch est déjà en français.
@@ -743,6 +750,18 @@
         }
     };
 
+    const HIGHLIGHT_LABEL_ATTR = 'data-seventv-custom-highlight-label';
+
+    /**
+     * Enlève l'étiquette de règle « Custom Highlights ». Retirer un attribut absent ne
+     * produit aucun enregistrement de mutation : l'opération est idempotente et ne peut
+     * pas relancer notre propre observateur.
+     */
+    const stripHighlightLabel = (el) => {
+        if (!CONFIG.hideHighlightLabel) return;
+        if (el.hasAttribute(HIGHLIGHT_LABEL_ATTR)) el.removeAttribute(HIGHLIGHT_LABEL_ATTR);
+    };
+
     const applyGradeAccent = (line) => {
         let accent = null;
         // 7TV trace-t-il déjà sa propre barre à gauche de cette ligne ? Si oui, le filet
@@ -1070,8 +1089,12 @@
         }
 
         // Messages utilisateur
-        if (element.matches?.(SEL.line)) { diag.lignes++; processReply(element); }
-        for (const line of element.querySelectorAll(SEL.line)) { diag.lignes++; processReply(line); }
+        if (element.matches?.(SEL.line)) {
+            diag.lignes++; stripHighlightLabel(element); processReply(element);
+        }
+        for (const line of element.querySelectorAll(SEL.line)) {
+            diag.lignes++; stripHighlightLabel(line); processReply(line);
+        }
     };
 
     // =========================================================================
@@ -1247,12 +1270,12 @@
                     if (node.nodeType === Node.ELEMENT_NODE) enqueue(node);
                 }
             } else if (m.type === 'attributes') {
-                // 7TV pose ses classes de highlight après l'insertion : il faut
-                // recalculer la couleur d'accent de la citation.
+                // 7TV pose ses classes de highlight après l'insertion, avec l'étiquette
+                // de règle : il faut retirer celle-ci et recalculer la couleur d'accent.
                 const t = m.target;
-                if (t.nodeType === Node.ELEMENT_NODE && t.classList?.contains('btc-reply')) {
-                    applyGradeAccent(t);
-                }
+                if (t.nodeType !== Node.ELEMENT_NODE) continue;
+                stripHighlightLabel(t);
+                if (t.classList?.contains('btc-reply')) applyGradeAccent(t);
             }
         }
     };

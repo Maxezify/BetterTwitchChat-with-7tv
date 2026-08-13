@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-82 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+85 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -64,7 +64,11 @@ Autres constats utiles :
   badge, à configurer dans l'extension. Une fois la règle créée, il pose la couleur en
   variables inline sur `.chat-line__message` :
   `--seventv-chat-custom-highlight-color`, `-border-color`, `-bg`, plus un attribut
-  `data-seventv-custom-highlight-label`. Le script lit ces variables en priorité.
+  `data-seventv-custom-highlight-label` qui porte le nom de la règle (souvent un emoji).
+  7TV affiche cette étiquette en bout de message depuis une feuille de style d'extension
+  que la page ne peut pas lire : impossible donc de cibler sa règle. Le script retire
+  l'attribut, ce qui la fait disparaître quel que soit le sélecteur employé en face —
+  et sans toucher au séparateur que 7TV dessine sur la même ligne.
 - Dans une notice, le porte-icône et le bloc de texte vivent dans un même flux en
   ligne : la première ligne démarre après l'icône, les suivantes reviennent sous elle.
   La profondeur du porte-icône varie selon le type de notice (un abonnement l'enveloppe

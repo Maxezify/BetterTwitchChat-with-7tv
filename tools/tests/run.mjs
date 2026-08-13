@@ -73,6 +73,11 @@ const FIXTURE = `<!doctype html><meta charset="utf-8"><title>fixture</title>
     background: var(--seventv-chat-custom-highlight-bg);
     border-left: 2px solid var(--seventv-chat-custom-highlight-border-color); }
   .seventv-chat-message-first-highlight  { background: rgba(205,56,205,.153); border-left: 2px solid rgb(205,56,205); }
+  /* Étiquette de règle « Custom Highlights ». La vraie règle vit dans une feuille de
+     style d'extension illisible depuis la page ; on reproduit le seul mécanisme qui
+     puisse afficher un attribut, pour que le test mesure une disparition réelle. */
+  .chat-line__message[data-seventv-custom-highlight-label]::after {
+    content: attr(data-seventv-custom-highlight-label); }
   .mystery-gift-theme__image { width: 96px; height: 96px; }
   /* Twitch rend les conteneurs du pseudo en bloc dans les notices, ce qui le pousse
      sur sa propre ligne au-dessus du texte. Déclaré important pour que le test prouve
@@ -192,6 +197,9 @@ const r = await page.evaluate(() => {
         emoteFrom7tv: /cdn\.7tv\.app/.test((q('.btc-reply-quote .btc-reply-emote') || {}).src || ''),
         mentions: qa('.btc-reply-quote .btc-reply-mention').length,
         gradeAccent: hl ? hl.style.getPropertyValue('--btc-reply-accent') : '',
+        etiquettesHighlight: qa('[data-seventv-custom-highlight-label]').length,
+        // Ce que la ligne de grade affiche réellement en fin de ligne.
+        etiquetteRendue: hl ? getComputedStyle(hl, '::after').content : null,
         // Style « rail » : la citation n'a plus de cadre propre, l'accent est porté
         // par un box-shadow interne sur toute la ligne.
         slotHasOwnBox: hlSlot
@@ -415,6 +423,8 @@ check('notice système 7TV traduite', r.sysNoticeText, 'timedout_user a été ex
 
 // --- 4. couleur de grade 7TV reprise sur la réponse ---
 check('accent de grade lu depuis la variable 7TV', r.gradeAccent, '#55E800');
+check('étiquette de règle 7TV retirée du DOM', r.etiquettesHighlight, 0);
+check('étiquette de règle 7TV plus affichée', r.etiquetteRendue, (v) => v === 'none' || v === '""');
 // 7TV trace déjà sa barre sur cette ligne : nous ne devons rien ajouter par-dessus.
 check('pas d\'ombre ajoutée sur une ligne colorée par 7TV', r.lineBoxShadow, 'none');
 check('pseudo cité non coloré par défaut', r.quotedNameColored, '');
@@ -440,18 +450,26 @@ await page.evaluate(() => {
 await page.waitForTimeout(150);
 const accentBefore = await page.evaluate(() =>
     document.querySelector('#late .chat-line__message').style.getPropertyValue('--btc-reply-accent'));
-// En production, 7TV ajoute la classe ET les variables de couleur d'un seul geste.
+// En production, 7TV ajoute la classe, les variables de couleur ET l'étiquette de règle
+// d'un seul geste.
 await page.evaluate(() => {
     const el = document.querySelector('#late .chat-line__message');
     el.style.setProperty('--seventv-chat-custom-highlight-border-color', '#E005B9');
     el.style.setProperty('--seventv-chat-custom-highlight-bg', '#E005B926');
+    el.setAttribute('data-seventv-custom-highlight-label', '👮‍♂️');
     el.classList.add('seventv-chat-message-custom-highlight');
 });
 await page.waitForTimeout(200);
-const accentAfter = await page.evaluate(() =>
-    document.querySelector('#late .chat-line__message').style.getPropertyValue('--btc-reply-accent'));
+const apresHighlight = await page.evaluate(() => {
+    const el = document.querySelector('#late .chat-line__message');
+    return {
+        accent: el.style.getPropertyValue('--btc-reply-accent'),
+        etiquette: el.hasAttribute('data-seventv-custom-highlight-label')
+    };
+});
 check('pas d\'accent sans highlight', accentBefore, '');
-check('accent capté quand 7TV colore après coup', accentAfter, '#E005B9');
+check('accent capté quand 7TV colore après coup', apresHighlight.accent, '#E005B9');
+check('étiquette retirée quand 7TV la pose après coup', apresHighlight.etiquette, false);
 
 // Le highlight « premier message » de 7TV trace une bordure depuis sa feuille de style,
 // sans poser la moindre variable inline. Lire les variables ne suffit donc pas à savoir
