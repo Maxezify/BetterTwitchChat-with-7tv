@@ -41,6 +41,12 @@ const withInlineImage = (html) => html
     .replace(/srcset="[^"]*"/g, '')
     .replace(/src="https:\/\/static-cdn[^"]*"/g, `src="${INLINE_PNG}"`);
 
+// Taille attendue de la citation, dérivée du réglage du script plutôt que recopiée :
+// une valeur en dur se périme au premier changement d'échelle et transformerait un
+// réglage volontaire en échec de test.
+const FONT_SCALE = parseFloat((SCRIPT.match(/fontScale:\s*([\d.]+)/) || [])[1]);
+const TAILLE_CITATION = `${+(14 * FONT_SCALE).toFixed(4)}px`;
+
 const EMOTE_NAME = (LINES.emoteMessage.match(/data-emote-name="([^"]+)"/) || [])[1];
 const LONG_TEXT = `regarde ça ${EMOTE_NAME} @alice c'est un message vraiment très long qui doit s'afficher en entier sans être coupé par une ellipse au bout d'une seule ligne`;
 
@@ -243,6 +249,19 @@ const r = await page.evaluate(() => {
             return {
                 pseudoEtTexteSurUneLigne: !!premiereLigne
                     && Math.abs(premiereLigne.top - rn.top) <= 2,
+                // Les trois fragments que Twitch range dans des blocs distincts — le
+                // pseudo, les points de chaîne, le début de la phrase — doivent tenir
+                // sur une seule et même ligne. Formulé en hauteurs partagées et non en
+                // nombre de lignes : ce dernier dépend de la largeur et de la police,
+                // et se périmerait au premier changement d'échelle.
+                fragmentsSurUneLigne: (() => {
+                    const points = [...notice.querySelectorAll('p')]
+                        .find(el => el.textContent.trim() === '450');
+                    if (!points || !premiereLigne) return false;
+                    const tp = points.getBoundingClientRect().top;
+                    return Math.abs(tp - rn.top) <= 2
+                        && Math.abs(premiereLigne.top - tp) <= 2;
+                })(),
                 hauteur: Math.round(notice.getBoundingClientRect().height),
                 texte: notice.textContent,
                 couleur: getComputedStyle(p).color,
@@ -598,7 +617,7 @@ check('citation non tronquée (white-space)', r.whiteSpace, 'normal');
 check('citation non tronquée (overflow)', r.overflow, 'visible');
 check('citation non tronquée (text-overflow)', r.textOverflow, 'clip');
 check('citation sur plusieurs lignes', r.wrappedLines, (v) => v >= 3);
-check('police réduite', r.fontSize, '10.92px');
+check('police réduite', r.fontSize, TAILLE_CITATION);
 check('couleur grise', r.color, 'rgb(143, 143, 154)');
 check('préfixe « Répond à » retiré', r.prefixStripped, true);
 check('emote rendue dans la citation', r.emotes, 1);
@@ -612,8 +631,10 @@ check('mention mise en valeur', r.mentions, 1);
 check('notices à la taille du texte cité', r.noticeFontSize, (v) => v === r.fontSize);
 check('série de visionnage : pseudo et texte sur la même ligne',
     r.watchStreak, (v) => v && v.pseudoEtTexteSurUneLigne);
+// Formulé en fragments partageant une ligne, non en nombre de lignes : ce dernier
+// dépend de la largeur et de la taille de police, et se périmerait au premier réglage.
 check('série de visionnage : aucun bloc résiduel dans la notice',
-    r.watchStreak, (v) => v && v.lignes <= 2);
+    r.watchStreak, (v) => v && v.fragmentsSurUneLigne);
 check('série de visionnage : texte à la couleur du texte cité',
     r.watchStreak, (v) => v && v.couleur === r.color);
 // Twitch ne colore pas le pseudo d'une notice : sans garde-fou il hériterait du gris
@@ -933,12 +954,12 @@ const scaleFallback = await page.evaluate(async () => {
     root.style.removeProperty('--btc-reply-font-scale');
     return size;
 });
-check('la citation reste réduite sans la variable', scaleFallback, '10.92px');
+check('la citation reste réduite sans la variable', scaleFallback, TAILLE_CITATION);
 
 // Le diagnostic intégré doit rapporter la version et les tailles réellement appliquées.
 const diag = await page.evaluate(() => window.__BTC.check());
 check('__BTC.check() rapporte la version', diag.version, (v) => /^\d+\.\d+\.\d+$/.test(v));
-check('__BTC.check() mesure la citation', diag.tailleCitation, '10.92px');
+check('__BTC.check() mesure la citation', diag.tailleCitation, TAILLE_CITATION);
 check('__BTC.check() mesure le message', diag.tailleMessage, '14px');
 
 // Régression majeure : Twitch stylise la citation via une classe styled-components
@@ -975,15 +996,15 @@ const noticeVsTwitch = await page.evaluate(async () => {
     return out;
 });
 check('taille de notice tenue face à un !important injecté après nous',
-    noticeVsTwitch, '10.92px');
+    noticeVsTwitch, TAILLE_CITATION);
 
-check('taille tenue face à un !important concurrent', vsTwitch.fontSize, '10.92px');
+check('taille tenue face à un !important concurrent', vsTwitch.fontSize, TAILLE_CITATION);
 check('déroulement tenu face à un !important concurrent', vsTwitch.whiteSpace, 'normal');
 check('overflow tenu face à un !important concurrent', vsTwitch.overflow, 'visible');
 
 // Le diagnostic de cascade doit désigner notre règle comme gagnante.
 const why = await page.evaluate(() => window.__BTC.whyFontSize());
-check('whyFontSize() rapporte la taille appliquée', why.applique, '10.92px');
+check('whyFontSize() rapporte la taille appliquée', why.applique, TAILLE_CITATION);
 check('whyFontSize() trouve notre règle', why.regles,
     (rs) => rs.some(r => /btc-reply-quote/.test(r.selecteur || '') && r.important));
 
@@ -1050,6 +1071,9 @@ check('série de visionnage reteintée dès que la couleur de chaîne se présen
 // la frame qui suit l'insertion, donc APRÈS que Twitch a recollé le chat en bas. Sans
 // compensation, le bas du nouveau message se retrouve sous le pli.
 const EPSILON = 4;   // même tolérance que le script
+// Durée du glissement, lue dans le script : les messages ne rejoignent plus le bas
+// d'un coup, il faut donc laisser l'animation finir avant de mesurer l'état final.
+const SMOOTH_MS = parseInt((SCRIPT.match(/smoothScrollMs:\s*(\d+)/) || [])[1], 10) || 0;
 
 const reponse = (texte) => LINES.replyMod
     .replace(/<p title="[^"]*"/, `<p title="${texte}"`)
@@ -1132,11 +1156,13 @@ const arriveeMessage = async (pg, htmls) => {
         }
         sc.scrollTop = sc.scrollHeight;      // Twitch recolle lui-même, avant notre rAF
     }, [].concat(htmls));
-    await pg.waitForTimeout(130);
-    const apresScript = await ecartAuBas(pg);
-    await pg.waitForTimeout(500);
+    // Deux instants : pendant le glissement, puis une fois posé. Un seul relevé ne
+    // saurait pas distinguer « arrivé » de « n'a jamais bougé ».
+    await pg.waitForTimeout(120);
+    const pendantGlissement = await ecartAuBas(pg);
+    await pg.waitForTimeout(SMOOTH_MS + 600);
     const apresImages = await ecartAuBas(pg);
-    return { apresScript, apresImages };
+    return { pendantGlissement, apresImages };
 };
 
 const pageDefilante = await ouvrirPageDefilante(true);
@@ -1170,6 +1196,10 @@ const stabilite = await (async () => {
     return { avant, apres: await hauteur() };
 })();
 
+// Tout glissement en cours doit s'être posé : sinon l'animation d'un cas précédent
+// écrase la position que ce contrôle vient de fixer, et l'échec n'apprend rien.
+await pageDefilante.waitForTimeout(SMOOTH_MS + 400);
+
 // Quelqu'un qui a remonté l'historique ne doit jamais être ramené en bas de force.
 const remonte = await pageDefilante.evaluate(async (h) => {
     const sc = document.querySelector('#defilement');
@@ -1184,10 +1214,36 @@ const remonte = await pageDefilante.evaluate(async (h) => {
     return { avant, apres: Math.round(sc.scrollTop) };
 }, reponse(CITATION_LONGUE));
 
+// --- affichage progressif (Message Batching) ---
+// Twitch insère par paquets. Les lignes doivent être relâchées une par une, et seules
+// celles qu'il dépose à la racine du chat : masquer nos propres insertions ferait
+// clignoter le bloc de citation.
+const BATCH_MS = parseInt((SCRIPT.match(/messageBatchMs:\s*(\d+)/) || [])[1], 10) || 0;
+const lot = await pageDefilante.evaluate(async (h) => {
+    const root = document.querySelector('[data-test-selector="chat-scrollable-area__message-container"]');
+    for (let i = 0; i < 5; i++) {
+        const holder = document.createElement('div');
+        holder.innerHTML = h;
+        root.appendChild(holder.firstElementChild);
+    }
+    await new Promise(r => setTimeout(r, 40));
+    const masquesTot = document.querySelectorAll('.btc-differe').length;
+    await new Promise(r => setTimeout(r, 800));
+    return { masquesTot, masquesApres: document.querySelectorAll('.btc-differe').length };
+}, LINES.replyMod);
+check('messages relâchés progressivement et non d\'un bloc',
+    lot, (v) => v.masquesTot >= 2);
+check('toutes les lignes finissent par s\'afficher', lot, (v) => v.masquesApres === 0);
+
 const pageSansAncre = await ouvrirPageDefilante(false);
 const sansAncre = await arriveeMessage(pageSansAncre, reponse(CITATION_LONGUE));
 
-check('message ordinaire : aucun décalage à compenser', ordinaire.apresScript, (v) => v <= EPSILON);
+check('message ordinaire : entièrement visible une fois posé',
+    ordinaire.apresImages, (v) => v <= EPSILON);
+// Le message doit rejoindre le bas en glissant : mesuré en cours de route, l'écart
+// n'est pas encore refermé. Sans glissement il serait nul dès le premier relevé.
+check('les nouveaux messages glissent au lieu de sauter',
+    longue.pendantGlissement, (v) => v > EPSILON);
 check('réponse déroulée entièrement visible', longue.apresImages, (v) => v <= EPSILON);
 check('réponse chargée d\'emotes entièrement visible', emotee.apresImages, (v) => v <= EPSILON);
 check('emote aux proportions inconnues : décalage rattrapé au chargement',

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.18.0
+// @version      15.19.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -46,7 +46,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.18.0';
+    const VERSION = '15.19.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -69,7 +69,7 @@
             // Couleur du texte cité : gris, plus sombre que le texte des messages.
             color: '#8f8f9a',
             // Taille de la citation, relative au texte du chat.
-            fontScale: 0.78,
+            fontScale: 0.825,
             // Interligne de la citation. Sert aussi à caler verticalement la bulle.
             lineHeight: 1.4,
             // Espace entre le bas de la citation et le début du message.
@@ -130,6 +130,15 @@
         // --- Divers ---
         // Trait de séparation entre les messages. Désactivé : 7TV en pose déjà un
         // (classe seventv-chat-lines-separator-twitch sur <html>), le nôtre doublait.
+        // --- Rendu progressif (équivalents des réglages 7TV du même nom) ---
+        // Délai entre deux messages affichés. Twitch insère par paquets : dans un chat
+        // rapide, plusieurs lignes surgissent d'un coup et le regard décroche. On les
+        // relâche une par une. 0 désactive.
+        messageBatchMs: 25,
+        // Durée maximale du glissement vers le bas à l'arrivée d'un message, au lieu
+        // d'un saut sec. 0 désactive.
+        smoothScrollMs: 1500,
+
         separators: false,
         // Retire l'étiquette que 7TV accroche aux messages relevés par une règle
         // « Custom Highlights » (l'emoji ou le texte donné à la règle). On enlève
@@ -708,6 +717,11 @@
         }
         ` : ''}
 
+        /* ---------- Affichage progressif ---------- */
+        /* display:none plutôt que visibility:hidden : la ligne ne doit pas occuper sa
+           place tant qu'elle n'est pas relâchée, sinon le chat se décale d'un vide. */
+        .btc-differe { display: none !important; }
+
         /* ---------- Alignement emotes / badges ---------- */
         .chat-line__message .chat-badge {
             vertical-align: -0.15em !important;
@@ -1234,6 +1248,8 @@
                     if (attente.isConnected) poserTeinte(attente, rattrapage);
                 }
                 cartesNeutres.clear();
+        arreterAnimation();
+        relacherTout();
             }
         } else if (accentChaine) {
             composantes = accentChaine.split(',').map(v => parseFloat(v));
@@ -1533,10 +1549,69 @@
     let colleEnBas = true;
     const scrollersEcoutes = new WeakSet();
 
-    const mesurerCollage = (sc) =>
-        !sc || sc.scrollHeight - sc.scrollTop - sc.clientHeight <= SCROLL_EPSILON;
+    // Dernière valeur que nous avons nous-mêmes écrite. Sert à distinguer nos propres
+    // déplacements d'un geste de lecture : comparer les positions est sans dépendance
+    // de timing, contrairement à un drapeau qu'il faudrait lever et baisser à temps.
+    let dernierEcrit = -1;
+    let animation = null;
 
-    const recollerEnBas = (sc) => { if (sc) sc.scrollTop = sc.scrollHeight; };
+    const ecrireScroll = (sc, valeur) => {
+        sc.scrollTop = Math.max(0, Math.min(valeur, sc.scrollHeight - sc.clientHeight));
+        // On relit la valeur réellement retenue : le navigateur borne et arrondit à sa
+        // façon, et comparer notre intention à ce qu'il a fait ferait passer nos propres
+        // déplacements pour des gestes de lecture.
+        dernierEcrit = sc.scrollTop;
+    };
+
+    const arreterAnimation = () => {
+        if (animation) { clearInterval(animation.timer); animation = null; }
+    };
+
+    const mesurerCollage = (sc) => {
+        if (!sc) return true;
+        // Pendant un glissement, le chat n'est pas au bas mais il y va : le compter
+        // comme décroché arrêterait le suivi dès la première animation.
+        if (animation) return true;
+        return sc.scrollHeight - sc.scrollTop - sc.clientHeight <= SCROLL_EPSILON;
+    };
+
+    /**
+     * Rejoint le bas en glissant. La cible est relue à chaque pas : dans un chat rapide,
+     * de nouveaux messages arrivent pendant l'animation et la distance change en route.
+     * La durée est proportionnelle à la distance — un message isolé ne doit pas mettre
+     * une seconde et demie à monter — et plafonnée au réglage.
+     */
+    const glisserVersBas = (sc) => {
+        const duree = CONFIG.smoothScrollMs;
+        const pas = Math.max(8, CONFIG.messageBatchMs || 16);
+        const cible = () => sc.scrollHeight - sc.clientHeight;
+        const distance = cible() - sc.scrollTop;
+        if (distance <= SCROLL_EPSILON) { ecrireScroll(sc, cible()); return; }
+
+        if (animation) return;   // déjà en route : elle relira la cible d'elle-même
+        const depart = sc.scrollTop;
+        const debut = performance.now();
+        // Une distance d'une hauteur d'écran prend la durée maximale ; en dessous, la
+        // durée diminue d'autant, sans jamais descendre sous un pas d'animation.
+        const etendue = Math.max(1, sc.clientHeight);
+        const dureeUtile = Math.max(pas, Math.min(duree, duree * (distance / etendue)));
+
+        animation = {
+            timer: setInterval(() => {
+                if (!sc.isConnected) { arreterAnimation(); return; }
+                const t = Math.min(1, (performance.now() - debut) / dureeUtile);
+                const adouci = 1 - Math.pow(1 - t, 3);
+                ecrireScroll(sc, depart + (cible() - depart) * adouci);
+                if (t >= 1) { arreterAnimation(); ecrireScroll(sc, cible()); }
+            }, pas)
+        };
+    };
+
+    const recollerEnBas = (sc) => {
+        if (!sc) return;
+        if (CONFIG.smoothScrollMs > 0) { glisserVersBas(sc); return; }
+        ecrireScroll(sc, sc.scrollHeight);
+    };
 
     const trouverScroller = () => {
         const defile = (el) => !!el && el.scrollHeight - el.clientHeight > SCROLL_EPSILON;
@@ -1558,10 +1633,22 @@
         if (!scroller || !scroller.isConnected) scroller = trouverScroller();
         if (scroller && !scrollersEcoutes.has(scroller)) {
             scrollersEcoutes.add(scroller);
+            // Chrome « ancre » le défilement : quand du contenu apparaît, il déplace
+            // scrollTop de lui-même pour garder le même point de lecture à l'écran. Sur
+            // un chat qui révèle ses messages un par un, ce mouvement n'est pas un
+            // geste de lecture — mais il en émet l'événement, et notre suivi le prenait
+            // pour tel : le glissement s'interrompait dès la première ligne relâchée.
+            scroller.style.overflowAnchor = 'none';
             // Seule source fiable de l'intention de lecture : un agrandissement du
             // contenu n'émet aucun événement de défilement, une action humaine si.
-            scroller.addEventListener('scroll',
-                () => { colleEnBas = mesurerCollage(scroller); }, { passive: true });
+            scroller.addEventListener('scroll', () => {
+                // Nos propres écritures ne disent rien de l'intention de lecture.
+                if (Math.abs(scroller.scrollTop - dernierEcrit) <= 1.5) return;
+                // Un geste pendant un glissement l'interrompt : on rend la main.
+                arreterAnimation();
+                colleEnBas = scroller.scrollHeight - scroller.scrollTop
+                    - scroller.clientHeight <= SCROLL_EPSILON;
+            }, { passive: true });
         }
         return scroller;
     };
@@ -1577,6 +1664,50 @@
             connu.ratio = ratioPlausible(img.naturalWidth / img.naturalHeight);
         }
         if (colleEnBas) recollerEnBas(getScroller());
+    };
+
+    // =========================================================================
+    // AFFICHAGE PROGRESSIF
+    // Twitch insère les messages par paquets : dans un chat rapide, plusieurs lignes
+    // surgissent d'un coup. On les masque au moment même de leur insertion — le rappel
+    // de l'observateur s'exécute avant le premier rendu, donc rien ne clignote — puis
+    // on les relâche une par une. Au-delà d'un certain retard on renonce et on montre
+    // tout : étaler davantage ferait décrocher l'affichage du direct.
+    // =========================================================================
+    const AFFICHAGE_MAX_EN_ATTENTE = 40;
+    const enAttenteAffichage = [];
+    let timerAffichage = null;
+
+    const relacherTout = () => {
+        while (enAttenteAffichage.length) {
+            const line = enAttenteAffichage.shift();
+            if (line.isConnected) line.classList.remove('btc-differe');
+        }
+        if (timerAffichage) { clearInterval(timerAffichage); timerAffichage = null; }
+    };
+
+    const relacherSuivant = () => {
+        const line = enAttenteAffichage.shift();
+        if (line && line.isConnected) {
+            line.classList.remove('btc-differe');
+            if (colleEnBas) recollerEnBas(getScroller());
+        }
+        if (!enAttenteAffichage.length) { clearInterval(timerAffichage); timerAffichage = null; }
+    };
+
+    const differerAffichage = (node) => {
+        if (!CONFIG.messageBatchMs || node.nodeType !== Node.ELEMENT_NODE) return;
+        // Uniquement ce que Twitch dépose à la racine du chat. L'observateur voit aussi
+        // nos propres insertions — bloc de citation, liste des destinataires d'un gift —
+        // et les masquer reviendrait à faire clignoter notre travail. Garde-fou par
+        // précaution : aucun de nos éléments actuels n'atterrit là, mais rien ne le
+        // garantit à l'avenir et le symptôme serait difficile à relier à sa cause.
+        if (node.parentElement !== chatRoot) return;
+        if (node.classList.contains('btc-differe')) return;
+        node.classList.add('btc-differe');
+        enAttenteAffichage.push(node);
+        if (enAttenteAffichage.length > AFFICHAGE_MAX_EN_ATTENTE) { relacherTout(); return; }
+        if (!timerAffichage) timerAffichage = setInterval(relacherSuivant, CONFIG.messageBatchMs);
     };
 
     const flush = () => {
@@ -1609,7 +1740,9 @@
         for (const m of mutations) {
             if (m.type === 'childList') {
                 for (const node of m.addedNodes) {
-                    if (node.nodeType === Node.ELEMENT_NODE) enqueue(node);
+                    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+                    differerAffichage(node);
+                    enqueue(node);
                 }
             } else if (m.type === 'attributes') {
                 // 7TV pose ses classes de highlight après l'insertion, avec l'étiquette

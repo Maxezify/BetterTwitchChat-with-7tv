@@ -9,7 +9,7 @@ Userscript Tampermonkey qui rend le chat de Twitch plus lisible, compatible avec
 |---|---|
 | **Réponses mises en valeur** | Le message qui répond à quelqu'un reçoit un fond légèrement plus clair. La citation fait corps avec le message, sans cadre détaché. |
 | **Citation lisible en entier** | Twitch tronque la citation à une seule ligne avec des points de suspension. Elle est désormais affichée intégralement. |
-| **Citation discrète** | Police à 78 % du texte du chat, gris uni, pseudos soulignés, bulle calée sur la première ligne. Le « @pseudo » cité peut reprendre sa couleur de chat (`reply.colorQuotedName`), désactivé par défaut car trop voyant. |
+| **Citation discrète** | Police à 82,5 % du texte du chat, gris uni, pseudos soulignés, bulle calée sur la première ligne. Le « @pseudo » cité peut reprendre sa couleur de chat (`reply.colorQuotedName`), désactivé par défaut car trop voyant. |
 | **Emotes dans les citations** | Twitch ne met que du texte brut dans la citation. Le script indexe les emotes (7TV et Twitch) qui passent dans le chat et les réaffiche dans les réponses. |
 | **Notices compactées** | Subs, Primes, resubs, gifts, raids et séries de visionnage prennent la typographie du texte cité — même taille, même gris — et ne forment plus qu'un seul paragraphe. Tout ce que Twitch y range en bloc revient dans le flux : le pseudo, mais aussi la rangée « pseudo + points de chaîne » d'une série de visionnage, qui occupait cinq lignes à elle seule. L'icône est sortie du flux et centrée sur la hauteur de la notice entière, message d'abonnement compris ; sa place est réservée par un retrait, si bien que tout le contenu part d'un seul et même bord gauche. L'illustration « cadeau mystère » de 96 px devient une vignette de 26 px. |
 | **Pseudo coloré dans les notices** | Twitch n'applique pas la couleur de chat au pseudo d'une notice : il sort dans la couleur du texte et se noie une fois la notice grisée. Le script la repose depuis les messages vus passer. Une série de visionnage récompensant le fait de regarder et non d'écrire, la personne n'a souvent jamais parlé quand la notice tombe : le pseudo est alors recoloré après coup, dès son premier message. En attendant, il garde la couleur de texte de Twitch plutôt que le gris. |
@@ -17,6 +17,7 @@ Userscript Tampermonkey qui rend le chat de Twitch plus lisible, compatible avec
 | **Notices teintées** | Le fond de la notice reprend la couleur de sa barre latérale, à 15 %, comme 7TV teinte les messages qu'il relève. Twitch pose la couleur d'accent de la chaîne en style inline sur cette barre pour les abonnements ; une série de visionnage n'en porte pas et retombe sur un gris de thème, alors le script réutilise la couleur de chaîne vue ailleurs — y compris pour les annonces sans barre du tout — et reteinte après coup celles arrivées avant qu'elle soit connue. |
 | **Gifts multiples regroupés** | « X offre 50 abonnements » absorbe les « X a offert un abonnement à Y » qui suivent et affiche la liste des destinataires sur une seule notice. |
 | **Chat toujours collé en bas** | Dérouler une citation agrandit le message *après* que Twitch a fait défiler : le bas du nouveau message passait sous le pli. Le script remet le chat au bas une fois la ligne à sa taille définitive — et seulement si le chat y était déjà, pour ne jamais interrompre une lecture en cours dans l'historique. |
+| **Affichage progressif** | Deux équivalents des réglages 7TV du même nom. *Message Batching* (25 ms) relâche les messages un par un au lieu de les laisser surgir par paquets. *Smooth scroll chat* (1500 ms) fait glisser le chat vers le bas plutôt que d'y sauter. Si les réglages 7TV correspondants sont actifs, désactive-les d'un côté ou de l'autre : deux systèmes qui animent le même défilement se gênent. |
 | **Couleurs de grade 7TV** | Si 7TV colore un message (highlight par badge modo/VIP, first-time chatter, règle personnalisée), sa barre de couleur est laissée telle quelle : le script n'en superpose pas une seconde, qui doublerait l'épaisseur du trait. |
 
 ## Installation
@@ -42,7 +43,7 @@ reply.style           // 'rail' | 'inline' | 'card' — voir ci-dessous
 reply.lineTint        // fond du message qui répond
 reply.blockTint       // fond du bloc de citation (style 'card' uniquement)
 reply.color           // couleur du texte cité
-reply.fontScale       // taille de la citation (0.78 = 78 % du texte normal)
+reply.fontScale       // taille de la citation (0.825 = 82,5 % du texte normal)
 reply.lineHeight      // interligne de la citation, sert aussi à caler la bulle
 reply.gap             // espace au-dessus et en dessous de la citation
 reply.hidePrefix      // retire « Répond à », garde « @pseudo : texte »
@@ -60,6 +61,8 @@ compact.textIndent     // espace entre la barre de couleur et le contenu
 compact.aggregateGifts // regroupement des gifts multiples
 compact.giftWindowMs   // délai d'attente des gifts individuels
 
+messageBatchMs // délai entre deux messages affichés (0 désactive)
+smoothScrollMs // durée du glissement vers le bas (0 = saut instantané)
 separators   // trait de séparation entre les messages (désactivé : 7TV en pose un)
 hideHighlightLabel // retire l'étiquette des règles « Custom Highlights » de 7TV
 highlightPaddingTop // espace au-dessus des messages relevés par une de ces règles
@@ -149,7 +152,7 @@ styled-components changeant à chaque build de Twitch.
 
 - [`tools/7tv-dom-recorder.user.js`](tools/7tv-dom-recorder.user.js) — capture la
   structure réelle du chat pour diagnostiquer une future casse.
-- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 120 vérifications du script contre du
+- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 123 vérifications du script contre du
   DOM Twitch réellement capturé, exécutées dans Chromium.
 
 Voir [`tools/README.md`](tools/README.md).

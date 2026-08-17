@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-120 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+123 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -215,6 +215,18 @@ Autres constats utiles :
   est vide n'est **pas rendue du tout** par Chrome — sa boîte vaut 0 quelle que soit la
   hauteur imposée. Mesurer la taille d'une image exige donc de la servir pour de bon
   (`withInlineImage`, qui retire aussi le `srcset` — il l'emporte sur `src`).
+- Chrome **ancre le défilement** : quand du contenu apparaît, il déplace `scrollTop` de
+  lui-même pour garder le même point de lecture. Sur un chat qui révèle ses messages un
+  par un, ce mouvement émet un événement `scroll` indiscernable d'un geste humain — et il
+  interrompait le glissement dès la première ligne relâchée. `overflow-anchor: none` sur
+  l'élément qui défile est la parade. Symptôme caractéristique : chaque fonction marche
+  seule, la combinaison des deux échoue.
+- Un garde-fou qui compare la position **écrite** à celle relue se fait piéger : le
+  navigateur borne et arrondit à sa façon. Il faut relire `scrollTop` après écriture et
+  comparer à cette valeur-là.
+- 7TV n'expose **aucune classe** sur `<html>` pour « Message Batching » et « Smooth
+  scroll chat » : impossible de savoir depuis la page s'ils sont actifs. Deux
+  implémentations concurrentes du même défilement ne peuvent donc pas se détecter.
 - Les réglages actifs sont lisibles dans la liste de classes de `<html>`
   (`seventv-chat-message-style-full-width`, `seventv-chat-mention-highlight-enabled`…).
 - 7TV applique aux emotes un `style` inline `width/max-width/max-height` en `!important`.
