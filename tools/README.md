@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-129 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+131 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -244,8 +244,24 @@ Autres constats utiles :
   temps fixe — et non abandonner.
 - 7TV impose `width`/`max-width`/`max-height` en style inline important sur ses emotes,
   mais **pas `vertical-align`** : l'alignement reste accessible depuis une feuille
-  d'auteur. C'est ce qui permet de reproduire le réglage « Ligne de base (comme BTTV) »
-  de FrankerFaceZ.
+  d'auteur. Mais il faut viser la bonne boîte : chaque emote est **enveloppée** dans
+  `span.seventv-emote-anchor > span.seventv-emote-container` (et, pour une emote native,
+  `.chat-line__message--emote-button > … > .chat-image__container`). C'est l'enveloppe la
+  plus externe qui est alignée sur la ligne — aligner l'image à l'intérieur ne déplace
+  rien à l'écran, alors même que son style calculé confirme la consigne. Une vérification
+  portant sur ce style est donc vraie et sans rapport avec le rendu.
+- Mesurer un alignement demande deux précautions. Le repère de ligne de base doit être un
+  **élément remplacé** — le bas d'une image alignée sur la ligne de base y repose par
+  définition ; une boîte vide en `inline-block` se retrouve hors flux et donne des écarts
+  qui ne mesurent rien (relevé : repère à y=0). Et l'emote mesurée doit **réellement se
+  charger** : sinon Chrome rend son texte alternatif, dont la boîte ne suit pas les règles
+  d'un élément remplacé. En cas de doute, une capture d'écran tranche plus vite qu'un
+  raisonnement sur les lignes de base.
+- Un suiveur à constante de temps fixe **traîne proportionnellement au débit** : en
+  régime établi, son retard vaut vitesse × constante. Sur un chat nourri, le bas n'est
+  donc jamais rejoint — mesuré à 2355 px de retard sur une fenêtre de 300 px. Il faut
+  mesurer la croissance du contenu et resserrer la constante juste assez pour borner ce
+  retard ; le glissement accélère alors avec la cadence sans jamais redevenir un saut.
 - Les réglages actifs sont lisibles dans la liste de classes de `<html>`
   (`seventv-chat-message-style-full-width`, `seventv-chat-mention-highlight-enabled`…).
 - 7TV applique aux emotes un `style` inline `width/max-width/max-height` en `!important`.

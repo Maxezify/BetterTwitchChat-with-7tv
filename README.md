@@ -17,8 +17,8 @@ Userscript Tampermonkey qui rend le chat de Twitch plus lisible, compatible avec
 | **Notices teintées** | Le fond de la notice reprend la couleur de sa barre latérale, à 15 %, comme 7TV teinte les messages qu'il relève. Twitch pose la couleur d'accent de la chaîne en style inline sur cette barre pour les abonnements ; une série de visionnage n'en porte pas et retombe sur un gris de thème, alors le script réutilise la couleur de chaîne vue ailleurs — y compris pour les annonces sans barre du tout — et reteinte après coup celles arrivées avant qu'elle soit connue. |
 | **Gifts multiples regroupés** | « X offre 50 abonnements » absorbe les « X a offert un abonnement à Y » qui suivent et affiche la liste des destinataires sur une seule notice. |
 | **Chat toujours collé en bas** | Dérouler une citation agrandit le message *après* que Twitch a fait défiler : le bas du nouveau message passait sous le pli. Le script remet le chat au bas une fois la ligne à sa taille définitive — et seulement si le chat y était déjà, pour ne jamais interrompre une lecture en cours dans l'historique. |
-| **Affichage progressif** | Deux fonctions absentes de la nouvelle extension 7TV. *Message Batching* relâche les messages un par un plutôt que par paquets — réglé à une ligne par image, le plus rapide qui reste progressif. Sous une rafale, le rythme **accélère** au lieu de renoncer : le retard se résorbe en un temps fixe et aucun message ne surgit sans transition. *Smooth scroll chat* (1500 ms) fait glisser le chat vers le bas au lieu d'y sauter. Les deux avancent dans une **seule boucle calée sur la cadence de l'écran** : une minuterie à intervalle fixe produit des à-coups dès qu'elle tombe à côté d'un rafraîchissement. Le glissement suit une approche exponentielle — la vitesse décroît avec la distance — donc l'arrivée est douce et la cible peut s'éloigner en cours de route sans provoquer d'à-coup. |
-| **Emotes sur la ligne de base** | Comme le réglage « Ligne de base (comme BTTV) » de FrankerFaceZ : le bas de l'emote se pose sur la ligne d'écriture, donc elle est à la même hauteur que le texte. 7TV impose ses dimensions en style inline, mais pas l'alignement (`emoteAlign`). |
+| **Affichage progressif** | Deux fonctions absentes de la nouvelle extension 7TV. *Message Batching* relâche les messages un par un plutôt que par paquets — réglé à une ligne par image, le plus rapide qui reste progressif. Sous une rafale, le rythme **accélère** au lieu de renoncer : le retard se résorbe en un temps fixe et aucun message ne surgit sans transition. *Smooth scroll chat* (1500 ms) fait glisser le chat vers le bas au lieu d'y sauter, **en s'adaptant à la cadence** : un suiveur à vitesse fixe traîne proportionnellement au débit, et sur un chat nourri le retard se creuse sans fin — mesuré à 2355 px sur une fenêtre de 300. La vitesse se resserre juste assez pour maintenir le retard sous le quart de la hauteur visible, sans jamais redevenir un saut. Les deux avancent dans une **seule boucle calée sur la cadence de l'écran** : une minuterie à intervalle fixe produit des à-coups dès qu'elle tombe à côté d'un rafraîchissement. Le glissement suit une approche exponentielle — la vitesse décroît avec la distance — donc l'arrivée est douce et la cible peut s'éloigner en cours de route sans provoquer d'à-coup. |
+| **Emotes sur la ligne de base** | Comme le réglage « Ligne de base (comme BTTV) » de FrankerFaceZ : le bas de l'emote se pose sur la ligne d'écriture, les jambages des « p q g » passant dessous. 7TV enveloppe chaque emote dans `span.seventv-emote-anchor > span.seventv-emote-container` — c'est **l'enveloppe** qui constitue la boîte alignée sur la ligne, régler l'image seule ne déplace rien. Réglable par `emoteAlign`. |
 | **Couleurs de grade 7TV** | Si 7TV colore un message (highlight par badge modo/VIP, first-time chatter, règle personnalisée), sa barre de couleur est laissée telle quelle : le script n'en superpose pas une seconde, qui doublerait l'épaisseur du trait. |
 
 ## Installation
@@ -65,6 +65,7 @@ compact.giftWindowMs   // délai d'attente des gifts individuels
 messageBatchMs // délai minimal entre deux messages affichés
                // 1 = une ligne par image (défaut), 0 désactive la fonction
 smoothScrollMs // durée du glissement vers le bas (0 = saut instantané)
+smoothScrollMaxLag // retard maximal toléré, en fraction de la hauteur visible
 emoteAlign   // alignement vertical des emotes ('baseline', null pour n'y pas toucher)
 separators   // trait de séparation entre les messages (désactivé : 7TV en pose un)
 hideHighlightLabel // retire l'étiquette des règles « Custom Highlights » de 7TV
@@ -156,7 +157,7 @@ styled-components changeant à chaque build de Twitch.
 
 - [`tools/7tv-dom-recorder.user.js`](tools/7tv-dom-recorder.user.js) — capture la
   structure réelle du chat pour diagnostiquer une future casse.
-- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 129 vérifications du script contre du
+- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 131 vérifications du script contre du
   DOM Twitch réellement capturé, exécutées dans Chromium.
 
 Voir [`tools/README.md`](tools/README.md).

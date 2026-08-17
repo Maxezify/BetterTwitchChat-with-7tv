@@ -47,6 +47,15 @@ const withInlineImage = (html) => html
 const FONT_SCALE = parseFloat((SCRIPT.match(/fontScale:\s*([\d.]+)/) || [])[1]);
 const TAILLE_CITATION = `${+(14 * FONT_SCALE).toFixed(4)}px`;
 
+// Emote servie pour de bon : non chargée, Chrome rend son texte alternatif, dont la
+// boîte ne suit pas les règles d'un élément remplacé. Toute mesure d'alignement porterait
+// alors sur du texte et non sur l'image.
+const EMOTE_PNG = 'data:image/svg+xml;base64,' + Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"></svg>').toString('base64');
+const withInlineEmote = (html) => html.replace(
+    /<img([^>]*\bclass="[^"]*seventv-emote[^"]*"[^>]*)>/g,
+    (m, attrs) => `<img${attrs.replace(/srcset="[^"]*"/, '')} src="${EMOTE_PNG}">`);
+
 const EMOTE_NAME = (LINES.emoteMessage.match(/data-emote-name="([^"]+)"/) || [])[1];
 const LONG_TEXT = `regarde ça ${EMOTE_NAME} @alice c'est un message vraiment très long qui doit s'afficher en entier sans être coupé par une ellipse au bout d'une seule ligne`;
 
@@ -99,6 +108,12 @@ const FIXTURE = `<!doctype html><meta charset="utf-8"><title>fixture</title>
   .chat-line__message[data-seventv-custom-highlight-label]::after {
     content: attr(data-seventv-custom-highlight-label); }
   .mystery-gift-theme__image { width: 96px; height: 96px; }
+  /* Emote et son enveloppe, telles que 7TV les construit : c'est l'enveloppe qui porte
+     l'alignement dans le flux. On lui donne ici un alignement centré — l'autre choix
+     offert par FrankerFaceZ — pour que la fixture représente le cas à corriger et non
+     un état déjà acquis. */
+  .seventv-emote-anchor, .seventv-emote-container { display: inline-block; vertical-align: middle; }
+  img.seventv-emote { width: 28px; height: 28px; }
   /* Twitch rend les conteneurs du pseudo en bloc dans les notices, ce qui le pousse
      sur sa propre ligne au-dessus du texte. Déclaré important pour que le test prouve
      que nos règles l'emportent, comme pour la taille de la citation. */
@@ -384,12 +399,36 @@ const r = await page.evaluate(() => {
             const a = ic.getBoundingClientRect();
             return Math.round(((a.top + a.height / 2) - (b.top + b.height / 2)) * 10) / 10;
         }).filter(v => v !== null),
-        // Alignement des emotes du chat : posé sur la ligne de base, le bas de l'emote
-        // se pose sur la ligne d'écriture — le réglage « comme BTTV » de FrankerFaceZ.
+        // Alignement des emotes, mesuré sur la géométrie et non sur le style calculé :
+        // l'image vit dans une enveloppe, et c'est l'enveloppe qui est alignée sur la
+        // ligne. Lire le style de l'image donnait une réponse vraie et sans rapport avec
+        // ce qui s'affiche. Référence exacte de la ligne de base : une boîte vide alignée
+        // dessus, insérée dans le même flux — son bas repose sur la ligne d'écriture.
         alignementEmote: (() => {
-            const em = q('.chat-line__message img.seventv-emote,'
-                + ' .chat-line__message img[data-emote-name]');
-            return em ? getComputedStyle(em).verticalAlign : null;
+            const hote = q('.chat-line__message .text-fragment');
+            if (!hote) return null;
+            const essai = document.createElement('span');
+            essai.className = 'seventv-emote-anchor';
+            essai.innerHTML = '<span class="seventv-emote-container">'
+                + '<img class="seventv-emote" style="width:28px;height:28px"'
+                + ' src="data:image/svg+xml;base64,'
+                + 'PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyOCIgaGVpZ2h0PSIyOCI+PC9zdmc+'
+                + '"></span>';
+            hote.appendChild(essai);
+            const em = essai.querySelector('img');
+            const boite = essai;
+            const repere = document.createElement('span');
+            repere.style.cssText = 'display:inline-block;width:0;height:0;'
+                + 'vertical-align:baseline';
+            boite.parentNode.insertBefore(repere, boite.nextSibling);
+            // Mesuré sur l'image et non sur l'enveloppe : la boîte de l'enveloppe
+            // descend sous la ligne de base du renfort de police qu'elle contient, ce
+            // qui ferait constater un écart là où le rendu est juste.
+            const ecart = Math.round(
+                (em.getBoundingClientRect().bottom - repere.getBoundingClientRect().bottom) * 10) / 10;
+            repere.remove();
+            essai.remove();
+            return ecart;
         })(),
         etiquettesHighlight: qa('[data-seventv-custom-highlight-label]').length,
         // 7TV réserve 1.3rem au-dessus pour son étiquette, 0.75rem en dessous.
@@ -1009,16 +1048,18 @@ check('taille de notice tenue face à un !important injecté après nous',
 // le fait styled-components : à spécificité égale c'est l'ordre qui tranche.
 const alignVsRival = await page.evaluate(async () => {
     const rival = document.createElement('style');
-    rival.textContent = '.seventv-emote { vertical-align: middle !important; }';
+    rival.textContent = '.seventv-emote-container { vertical-align: middle !important; }';
     document.head.appendChild(rival);
     await new Promise(r => setTimeout(r, 60));
-    const em = document.querySelector('.chat-line__message img.seventv-emote,'
-        + ' .chat-line__message img[data-emote-name]');
+    const em = document.querySelector('.chat-line__message .seventv-emote-container');
     const out = em ? getComputedStyle(em).verticalAlign : null;
     rival.remove();
     return out;
 });
-check('emotes alignées sur la ligne de base', r.alignementEmote, 'baseline');
+// Écart entre le bas de l'emote et la ligne d'écriture : nul quand elle est posée
+// dessus, plusieurs pixels dès qu'un alignement centré s'applique.
+check('emotes posées sur la ligne d\'écriture',
+    r.alignementEmote, (v) => v !== null && Math.abs(v) <= 0.5);
 check('alignement tenu face à un !important injecté après nous', alignVsRival, 'baseline');
 
 check('taille tenue face à un !important concurrent', vsTwitch.fontSize, TAILLE_CITATION);
@@ -1291,6 +1332,32 @@ check('rafale : aucun message ne surgit sans transition',
 check('rafale : le retard se résorbe au lieu de s\'accumuler',
     rafale, (v) => v.milieu < v.tot);
 check('rafale : tout finit par s\'afficher', rafale, (v) => v.fin === 0);
+
+// Sous un flot soutenu, le glissement doit accélérer de lui-même : un suiveur à vitesse
+// fixe traîne proportionnellement à la cadence, et le retard creusé ne se rattrape
+// jamais. On injecte pendant une seconde, puis on regarde où en est le bas du chat.
+const flot = await pageDefilante.evaluate(async (h) => {
+    const root = document.querySelector('[data-test-selector="chat-scrollable-area__message-container"]');
+    const sc = document.querySelector('#defilement');
+    sc.scrollTop = sc.scrollHeight;
+    const ecarts = [];
+    for (let i = 0; i < 25; i++) {
+        for (let k = 0; k < 3; k++) {
+            const holder = document.createElement('div');
+            holder.innerHTML = h;
+            root.appendChild(holder.firstElementChild);
+        }
+        await new Promise(r => setTimeout(r, 40));
+        ecarts.push(Math.round(sc.scrollHeight - sc.scrollTop - sc.clientHeight));
+    }
+    await new Promise(r => setTimeout(r, 2500));
+    return { pointe: Math.max(...ecarts.slice(5)), visible: sc.clientHeight, apres:
+        Math.round(sc.scrollHeight - sc.scrollTop - sc.clientHeight) };
+}, LINES.plain);
+check('flot soutenu : le retard reste borné au lieu de se creuser',
+    flot, (v) => v.pointe <= v.visible * 0.6);
+check('flot soutenu : le bas est rejoint une fois le flot retombé',
+    flot, (v) => v.apres <= 1);
 
 // Une seule demande d'image par image affichée : la boucle ne doit pas se replanifier
 // depuis son propre pas. Invisible à l'œil, mais c'est le double de réveils.

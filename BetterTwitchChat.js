@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.21.0
+// @version      15.22.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -46,7 +46,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.21.0';
+    const VERSION = '15.22.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -139,6 +139,10 @@
         // Durée maximale du glissement vers le bas à l'arrivée d'un message, au lieu
         // d'un saut sec. 0 désactive.
         smoothScrollMs: 1500,
+        // Retard maximal toléré, en fraction de la hauteur visible. Le glissement
+        // accélère de lui-même quand le chat s'emballe : sans cela, un flot soutenu
+        // creuse un retard qui grandit sans fin et le bas du chat n'est jamais rejoint.
+        smoothScrollMaxLag: 0.25,
 
         // Alignement vertical des emotes dans les messages. 'baseline' pose le bas de
         // l'emote sur la ligne d'écriture, comme BTTV et FrankerFaceZ : elle se trouve
@@ -191,6 +195,11 @@
         massGiftImage: '.mystery-gift-theme__image',
         massGiftOverlay: '.mystery-gift-theme__overlay',
         emote: 'img[data-emote-name],img.seventv-emote,img.chat-image,img.chat-line__message--emote',
+        // Boîtes qui portent réellement l'emote dans le flux du texte. C'est l'enveloppe
+        // la plus externe qui est alignée sur la ligne, pas l'image : régler l'image
+        // seule ne déplace rien à l'écran.
+        emoteBox: '.seventv-emote-anchor,.seventv-emote-container,.chat-image__container,'
+            + '.chat-line__message--emote-button',
         // Élément qui porte réellement le défilement du chat. 7TV stylise lui-même sa
         // scrollbar sur ce sélecteur, c'est donc une ancre déclarée, pas devinée.
         scroller: '.scrollable-area[data-a-target="chat-scroller"],[data-a-target="chat-scroller"]'
@@ -736,7 +745,7 @@
            dimensions en style inline important, mais pas l'alignement : celui-ci nous
            reste accessible. Le sélecteur de type porte la spécificité à (0,2,1), au-dessus
            des classes de 7TV et de Twitch, sans dépendre d'un hachage. */
-        ${CONFIG.emoteAlign ? SEL.emote.split(',')
+        ${CONFIG.emoteAlign ? (SEL.emoteBox + ',' + SEL.emote).split(',')
             .map(sel => `.chat-line__message ${sel.trim()}`).join(',\n        ')
             + ` {\n            vertical-align: ${CONFIG.emoteAlign} !important;\n        }` : ''}
         `;
@@ -1587,8 +1596,15 @@
     let horodatage = 0;
     let dansLaBoucle = false;
     let glissementActif = false;
+    // Vitesse de croissance du contenu, lissée, en pixels par seconde. C'est la mesure
+    // de la cadence du chat : chaque message allonge la liste d'autant de pixels.
+    let vitesseContenu = 0;
+    let hauteurPrecedente = 0;
 
-    const arreterGlissement = () => { glissementActif = false; };
+    const arreterGlissement = () => {
+        glissementActif = false;
+        hauteurPrecedente = 0;   // la prochaine reprise repart d'une mesure fraîche
+    };
 
     const demarrerBoucle = () => {
         // Ne rien planifier depuis l'intérieur de la boucle : elle se replanifie seule à
@@ -1614,9 +1630,26 @@
         if (!sc || !sc.isConnected) { glissementActif = false; return false; }
         const cible = sc.scrollHeight - sc.clientHeight;
         const reste = cible - sc.scrollTop;
-        if (reste <= 1) { ecrireScroll(sc, cible); glissementActif = false; return false; }
+        if (reste <= 1) { ecrireScroll(sc, cible); arreterGlissement(); return false; }
+
+        // Cadence du chat, mesurée sur la croissance du contenu. Lissée, sinon le rythme
+        // saccadé des insertions ferait osciller la vitesse d'une image à l'autre.
+        const hauteur = sc.scrollHeight;
+        if (hauteurPrecedente) {
+            const instantanee = Math.max(0, hauteur - hauteurPrecedente) * 1000 / dt;
+            vitesseContenu += (instantanee - vitesseContenu) * 0.2;
+        }
+        hauteurPrecedente = hauteur;
+
         // Constante de temps : au bout de smoothScrollMs, 98 % du trajet est fait.
-        const tau = Math.max(16, CONFIG.smoothScrollMs / 4);
+        // Un suiveur de constante tau traîne, en régime établi, de vitesse × tau. On
+        // resserre donc tau juste assez pour que ce retard reste sous la limite : le
+        // glissement s'accélère quand le chat s'emballe, sans jamais devenir un saut.
+        const tauBase = Math.max(16, CONFIG.smoothScrollMs / 4);
+        const retardMax = Math.max(40, sc.clientHeight * CONFIG.smoothScrollMaxLag);
+        const tau = vitesseContenu > 1
+            ? Math.max(16, Math.min(tauBase, 1000 * retardMax / vitesseContenu))
+            : tauBase;
         // Plancher d'un pixel : un déplacement fractionnaire n'est pas appliqué par le
         // navigateur, et la course exponentielle finit forcément par en demander un.
         // Sans ce plancher, le suiveur se fige à quelques pixels du bas — mesuré.
