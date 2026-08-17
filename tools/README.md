@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-124 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+129 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -238,6 +238,14 @@ Autres constats utiles :
 - Planifier une image **depuis l'intérieur** d'un rappel d'animation en fait naître deux
   par image : le rappel se replanifie déjà seul à la fin de son pas. Symptôme mesurable
   uniquement en comptant les demandes, pas à l'œil — d'où le compteur dans la suite.
+- Un affichage étalé qui **renonce** au-delà d'un certain retard trahit sa raison d'être :
+  sur un chat rapide, la moitié des messages surgit alors sans transition. Il faut
+  accélérer — relâcher plusieurs lignes par image, en visant à résorber le retard en un
+  temps fixe — et non abandonner.
+- 7TV impose `width`/`max-width`/`max-height` en style inline important sur ses emotes,
+  mais **pas `vertical-align`** : l'alignement reste accessible depuis une feuille
+  d'auteur. C'est ce qui permet de reproduire le réglage « Ligne de base (comme BTTV) »
+  de FrankerFaceZ.
 - Les réglages actifs sont lisibles dans la liste de classes de `<html>`
   (`seventv-chat-message-style-full-width`, `seventv-chat-mention-highlight-enabled`…).
 - 7TV applique aux emotes un `style` inline `width/max-width/max-height` en `!important`.

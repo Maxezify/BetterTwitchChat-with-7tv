@@ -384,6 +384,13 @@ const r = await page.evaluate(() => {
             const a = ic.getBoundingClientRect();
             return Math.round(((a.top + a.height / 2) - (b.top + b.height / 2)) * 10) / 10;
         }).filter(v => v !== null),
+        // Alignement des emotes du chat : posé sur la ligne de base, le bas de l'emote
+        // se pose sur la ligne d'écriture — le réglage « comme BTTV » de FrankerFaceZ.
+        alignementEmote: (() => {
+            const em = q('.chat-line__message img.seventv-emote,'
+                + ' .chat-line__message img[data-emote-name]');
+            return em ? getComputedStyle(em).verticalAlign : null;
+        })(),
         etiquettesHighlight: qa('[data-seventv-custom-highlight-label]').length,
         // 7TV réserve 1.3rem au-dessus pour son étiquette, 0.75rem en dessous.
         espacesHighlight: hl
@@ -998,6 +1005,22 @@ const noticeVsTwitch = await page.evaluate(async () => {
 check('taille de notice tenue face à un !important injecté après nous',
     noticeVsTwitch, TAILLE_CITATION);
 
+// L'alignement doit tenir face à une règle concurrente injectée après la nôtre, comme
+// le fait styled-components : à spécificité égale c'est l'ordre qui tranche.
+const alignVsRival = await page.evaluate(async () => {
+    const rival = document.createElement('style');
+    rival.textContent = '.seventv-emote { vertical-align: middle !important; }';
+    document.head.appendChild(rival);
+    await new Promise(r => setTimeout(r, 60));
+    const em = document.querySelector('.chat-line__message img.seventv-emote,'
+        + ' .chat-line__message img[data-emote-name]');
+    const out = em ? getComputedStyle(em).verticalAlign : null;
+    rival.remove();
+    return out;
+});
+check('emotes alignées sur la ligne de base', r.alignementEmote, 'baseline');
+check('alignement tenu face à un !important injecté après nous', alignVsRival, 'baseline');
+
 check('taille tenue face à un !important concurrent', vsTwitch.fontSize, TAILLE_CITATION);
 check('déroulement tenu face à un !important concurrent', vsTwitch.whiteSpace, 'normal');
 check('overflow tenu face à un !important concurrent', vsTwitch.overflow, 'visible');
@@ -1230,7 +1253,7 @@ const remonte = await pageDefilante.evaluate(async (h) => {
 const BATCH_MS = parseInt((SCRIPT.match(/messageBatchMs:\s*(\d+)/) || [])[1], 10) || 0;
 const lot = await pageDefilante.evaluate(async (h) => {
     const root = document.querySelector('[data-test-selector="chat-scrollable-area__message-container"]');
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 14; i++) {
         const holder = document.createElement('div');
         holder.innerHTML = h;
         root.appendChild(holder.firstElementChild);
@@ -1241,8 +1264,33 @@ const lot = await pageDefilante.evaluate(async (h) => {
     return { masquesTot, masquesApres: document.querySelectorAll('.btc-differe').length };
 }, LINES.replyMod);
 check('messages relâchés progressivement et non d\'un bloc',
-    lot, (v) => v.masquesTot >= 2);
+    lot, (v) => v.masquesTot >= 4);
 check('toutes les lignes finissent par s\'afficher', lot, (v) => v.masquesApres === 0);
+
+// Sous une rafale, la progressivité doit tenir. L'ancienne version renonçait au-delà
+// d'un certain retard et montrait tout d'un coup : une partie des messages surgissait
+// sans transition, ce qui est précisément ce que la fonction doit empêcher.
+const rafale = await pageDefilante.evaluate(async (h) => {
+    const root = document.querySelector('[data-test-selector="chat-scrollable-area__message-container"]');
+    for (let i = 0; i < 120; i++) {
+        const holder = document.createElement('div');
+        holder.innerHTML = h;
+        root.appendChild(holder.firstElementChild);
+    }
+    const releve = async (ms) => {
+        await new Promise(r => setTimeout(r, ms));
+        return document.querySelectorAll('.btc-differe').length;
+    };
+    const tot = await releve(30);
+    const milieu = await releve(120);
+    const fin = await releve(1500);
+    return { tot, milieu, fin };
+}, LINES.plain);
+check('rafale : aucun message ne surgit sans transition',
+    rafale, (v) => v.tot > 40);
+check('rafale : le retard se résorbe au lieu de s\'accumuler',
+    rafale, (v) => v.milieu < v.tot);
+check('rafale : tout finit par s\'afficher', rafale, (v) => v.fin === 0);
 
 // Une seule demande d'image par image affichée : la boucle ne doit pas se replanifier
 // depuis son propre pas. Invisible à l'œil, mais c'est le double de réveils.

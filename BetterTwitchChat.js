@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.20.0
+// @version      15.21.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -46,7 +46,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.20.0';
+    const VERSION = '15.21.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -139,6 +139,11 @@
         // Durée maximale du glissement vers le bas à l'arrivée d'un message, au lieu
         // d'un saut sec. 0 désactive.
         smoothScrollMs: 1500,
+
+        // Alignement vertical des emotes dans les messages. 'baseline' pose le bas de
+        // l'emote sur la ligne d'écriture, comme BTTV et FrankerFaceZ : elle se trouve
+        // alors à la même hauteur que le texte. Mettre null pour ne pas y toucher.
+        emoteAlign: 'baseline',
 
         separators: false,
         // Retire l'étiquette que 7TV accroche aux messages relevés par une règle
@@ -727,6 +732,13 @@
         .chat-line__message .chat-badge {
             vertical-align: -0.15em !important;
         }
+        /* Emotes posées sur la ligne de base, comme BTTV et FrankerFaceZ. 7TV impose ses
+           dimensions en style inline important, mais pas l'alignement : celui-ci nous
+           reste accessible. Le sélecteur de type porte la spécificité à (0,2,1), au-dessus
+           des classes de 7TV et de Twitch, sans dépendre d'un hachage. */
+        ${CONFIG.emoteAlign ? SEL.emote.split(',')
+            .map(sel => `.chat-line__message ${sel.trim()}`).join(',\n        ')
+            + ` {\n            vertical-align: ${CONFIG.emoteAlign} !important;\n        }` : ''}
         `;
     };
 
@@ -1622,7 +1634,7 @@
         const dt = Math.min(100, Math.max(1, maintenant - horodatage));
         horodatage = maintenant;
 
-        const encoreDesMessages = relacherEnAttente(maintenant);
+        const encoreDesMessages = relacherEnAttente(maintenant, dt);
         const encoreDuTrajet = avancerGlissement(dt);
         dansLaBoucle = false;
         if (encoreDesMessages || encoreDuTrajet) {
@@ -1710,7 +1722,10 @@
     // on les relâche une par une. Au-delà d'un certain retard on renonce et on montre
     // tout : étaler davantage ferait décrocher l'affichage du direct.
     // =========================================================================
-    const AFFICHAGE_MAX_EN_ATTENTE = 40;
+    // Retard au-delà duquel on accélère au lieu de renoncer. L'ancienne version montrait
+    // tout d'un coup passé ce seuil : sur un chat rapide, une partie des messages
+    // surgissait donc sans progressivité — exactement ce que la fonction doit éviter.
+    const AFFICHAGE_RATTRAPAGE_MS = 400;
     const enAttenteAffichage = [];
     let dernierRelache = 0;
 
@@ -1722,12 +1737,23 @@
         while (enAttenteAffichage.length) relacherLigne(enAttenteAffichage.shift());
     };
 
-    /** Appelé par la boucle. Rend vrai tant qu'il reste des lignes à relâcher. */
-    const relacherEnAttente = (maintenant) => {
-        if (!enAttenteAffichage.length) return false;
+    /**
+     * Appelé par la boucle. Rend vrai tant qu'il reste des lignes à relâcher.
+     * Quand le retard grandit, on relâche plusieurs lignes par image plutôt que
+     * d'abandonner : le rythme s'accélère, mais l'affichage reste progressif du début à
+     * la fin. Le nombre est calculé pour résorber le retard en un temps fixe, quelle que
+     * soit la cadence du chat.
+     */
+    const relacherEnAttente = (maintenant, dt) => {
+        const attente = enAttenteAffichage.length;
+        if (!attente) return false;
         if (maintenant - dernierRelache < CONFIG.messageBatchMs) return true;
         dernierRelache = maintenant;
-        relacherLigne(enAttenteAffichage.shift());
+
+        const parImage = Math.max(1, Math.ceil(attente * dt / AFFICHAGE_RATTRAPAGE_MS));
+        for (let i = 0; i < parImage && enAttenteAffichage.length; i++) {
+            relacherLigne(enAttenteAffichage.shift());
+        }
         // Le contenu vient de grandir : le suiveur doit repartir vers le nouveau bas.
         if (colleEnBas) recollerEnBas(getScroller());
         return enAttenteAffichage.length > 0;
@@ -1744,8 +1770,6 @@
         if (node.classList.contains('btc-differe')) return;
         node.classList.add('btc-differe');
         enAttenteAffichage.push(node);
-        // Au-delà de ce retard, étaler davantage ferait décrocher l'affichage du direct.
-        if (enAttenteAffichage.length > AFFICHAGE_MAX_EN_ATTENTE) { relacherTout(); return; }
         demarrerBoucle();
     };
 
