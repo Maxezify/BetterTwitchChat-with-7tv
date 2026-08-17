@@ -1133,6 +1133,15 @@ const ouvrirPageDefilante = async (avecAncre) => {
             body: '<svg xmlns="http://www.w3.org/2000/svg" width="112" height="32"></svg>' });
     });
     await pg.goto('https://www.twitch.tv/examplestreamer');
+    // Compteur posé avant le script : il verra donc toutes ses demandes d'image. Un
+    // second compteur, branché sur la fonction native, donne le nombre d'images réelles.
+    // Le rapport des deux dit si la boucle se replanifie plus d'une fois par image.
+    await pg.evaluate(() => {
+        const natif = window.requestAnimationFrame.bind(window);
+        window.__natif = natif;
+        window.__raf = 0;
+        window.requestAnimationFrame = (cb) => { window.__raf++; return natif(cb); };
+    });
     await pg.evaluate(SCRIPT);
     await pg.waitForTimeout(250);
     return pg;
@@ -1235,17 +1244,37 @@ check('messages relâchés progressivement et non d\'un bloc',
     lot, (v) => v.masquesTot >= 2);
 check('toutes les lignes finissent par s\'afficher', lot, (v) => v.masquesApres === 0);
 
+// Une seule demande d'image par image affichée : la boucle ne doit pas se replanifier
+// depuis son propre pas. Invisible à l'œil, mais c'est le double de réveils.
+const cadence = await pageDefilante.evaluate(async (h) => {
+    const root = document.querySelector('[data-test-selector="chat-scrollable-area__message-container"]');
+    const sc = document.querySelector('#defilement');
+    sc.scrollTop = sc.scrollHeight;
+    const holder = document.createElement('div');
+    holder.innerHTML = h;
+    root.appendChild(holder.firstElementChild);
+    sc.scrollTop = sc.scrollHeight;
+    window.__raf = 0;
+    let images = 0;
+    const compter = () => { images++; window.__natif(compter); };
+    window.__natif(compter);
+    await new Promise(r => setTimeout(r, 600));
+    return { demandes: window.__raf, images };
+}, LINES.replyMod);
+check('la boucle d\'animation ne se réveille pas deux fois par image',
+    cadence, (v) => v.images > 10 && v.demandes <= v.images * 1.5);
+
 const pageSansAncre = await ouvrirPageDefilante(false);
 const sansAncre = await arriveeMessage(pageSansAncre, reponse(CITATION_LONGUE));
 
 check('message ordinaire : entièrement visible une fois posé',
-    ordinaire.apresImages, (v) => v <= EPSILON);
+    ordinaire.apresImages, (v) => v <= 1);
 // Le message doit rejoindre le bas en glissant : mesuré en cours de route, l'écart
 // n'est pas encore refermé. Sans glissement il serait nul dès le premier relevé.
 check('les nouveaux messages glissent au lieu de sauter',
     longue.pendantGlissement, (v) => v > EPSILON);
-check('réponse déroulée entièrement visible', longue.apresImages, (v) => v <= EPSILON);
-check('réponse chargée d\'emotes entièrement visible', emotee.apresImages, (v) => v <= EPSILON);
+check('réponse déroulée entièrement visible', longue.apresImages, (v) => v <= 1);
+check('réponse chargée d\'emotes entièrement visible', emotee.apresImages, (v) => v <= 1);
 check('emote aux proportions inconnues : décalage rattrapé au chargement',
     inedite.apresImages, (v) => v <= EPSILON);
 check('citation stable pendant le chargement des emotes', stabilite,

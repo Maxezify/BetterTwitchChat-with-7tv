@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-123 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+124 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -227,6 +227,17 @@ Autres constats utiles :
 - 7TV n'expose **aucune classe** sur `<html>` pour « Message Batching » et « Smooth
   scroll chat » : impossible de savoir depuis la page s'ils sont actifs. Deux
   implémentations concurrentes du même défilement ne peuvent donc pas se détecter.
+- Une valeur **fractionnaire écrite dans `scrollTop` n'est pas appliquée** : le navigateur
+  la rejette. Une animation dont le pas décroît — c'est le cas de toute approche
+  exponentielle — finit donc par demander moins d'un pixel et se **fige à quelques
+  pixels du but**, en tournant à vide. Mesuré : blocage net à 11 px. Il faut un plancher
+  d'un pixel par image.
+- `setInterval` à intervalle fixe produit des à-coups visibles : dès qu'un pas tombe à
+  côté d'un rafraîchissement, l'image est perdue. `requestAnimationFrame` avec un pas
+  proportionnel au temps écoulé donne le même rendu à 60 comme à 144 Hz.
+- Planifier une image **depuis l'intérieur** d'un rappel d'animation en fait naître deux
+  par image : le rappel se replanifie déjà seul à la fin de son pas. Symptôme mesurable
+  uniquement en comptant les demandes, pas à l'œil — d'où le compteur dans la suite.
 - Les réglages actifs sont lisibles dans la liste de classes de `<html>`
   (`seventv-chat-message-style-full-width`, `seventv-chat-mention-highlight-enabled`…).
 - 7TV applique aux emotes un `style` inline `width/max-width/max-height` en `!important`.

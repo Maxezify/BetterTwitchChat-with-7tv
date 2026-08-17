@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.19.0
+// @version      15.20.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -46,7 +46,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.19.0';
+    const VERSION = '15.20.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -131,10 +131,11 @@
         // Trait de séparation entre les messages. Désactivé : 7TV en pose déjà un
         // (classe seventv-chat-lines-separator-twitch sur <html>), le nôtre doublait.
         // --- Rendu progressif (équivalents des réglages 7TV du même nom) ---
-        // Délai entre deux messages affichés. Twitch insère par paquets : dans un chat
-        // rapide, plusieurs lignes surgissent d'un coup et le regard décroche. On les
-        // relâche une par une. 0 désactive.
-        messageBatchMs: 25,
+        // Délai minimal entre deux messages affichés. Twitch insère par paquets : dans
+        // un chat rapide, plusieurs lignes surgissent d'un coup et le regard décroche.
+        // On les relâche une par une, à la cadence de l'écran. 1 revient à une ligne par
+        // image — le plus rapide qui reste progressif. 0 désactive la fonction.
+        messageBatchMs: 1,
         // Durée maximale du glissement vers le bas à l'arrivée d'un message, au lieu
         // d'un saut sec. 0 désactive.
         smoothScrollMs: 1500,
@@ -1248,7 +1249,7 @@
                     if (attente.isConnected) poserTeinte(attente, rattrapage);
                 }
                 cartesNeutres.clear();
-        arreterAnimation();
+        arreterGlissement();
         relacherTout();
             }
         } else if (accentChaine) {
@@ -1553,7 +1554,6 @@
     // déplacements d'un geste de lecture : comparer les positions est sans dépendance
     // de timing, contrairement à un drapeau qu'il faudrait lever et baisser à temps.
     let dernierEcrit = -1;
-    let animation = null;
 
     const ecrireScroll = (sc, valeur) => {
         sc.scrollTop = Math.max(0, Math.min(valeur, sc.scrollHeight - sc.clientHeight));
@@ -1563,53 +1563,89 @@
         dernierEcrit = sc.scrollTop;
     };
 
-    const arreterAnimation = () => {
-        if (animation) { clearInterval(animation.timer); animation = null; }
+    // =====================================================================
+    // BOUCLE D'ANIMATION
+    // Le glissement du chat et le relâchement des messages avancent tous deux ici. Une
+    // seule boucle plutôt que deux minuteries : moins de réveils, et surtout les deux
+    // ne peuvent plus se désynchroniser. Elle suit la cadence de l'écran — c'est ce qui
+    // fait la fluidité, une minuterie à intervalle fixe produit des à-coups dès qu'elle
+    // tombe à côté d'un rafraîchissement.
+    // =====================================================================
+    let frame = null;
+    let horodatage = 0;
+    let dansLaBoucle = false;
+    let glissementActif = false;
+
+    const arreterGlissement = () => { glissementActif = false; };
+
+    const demarrerBoucle = () => {
+        // Ne rien planifier depuis l'intérieur de la boucle : elle se replanifie seule à
+        // la fin du pas. Sans cette garde, un relâchement de message provoquait une
+        // seconde planification dans la même image, et le pas suivant recevait un temps
+        // écoulé nul — donc un déplacement nul.
+        if (frame !== null || dansLaBoucle) return;
+        horodatage = performance.now();
+        frame = requestAnimationFrame(avancerBoucle);
+    };
+
+    /**
+     * Approche exponentielle : à chaque image, on parcourt une part de ce qu'il reste.
+     * La vitesse décroît donc avec la distance, ce qui donne une arrivée douce et sans
+     * arrêt net — un trajet à durée fixe doit trancher quand il expire, et ce coup de
+     * ciseaux est exactement ce qui se voit. La cible est relue à chaque image : dans un
+     * chat rapide, elle s'éloigne pendant le trajet, et le suiveur s'y adapte seul.
+     * La part dépend du temps écoulé, donc le rendu est le même à 60 ou 144 Hz.
+     */
+    const avancerGlissement = (dt) => {
+        if (!glissementActif) return false;
+        const sc = getScroller();
+        if (!sc || !sc.isConnected) { glissementActif = false; return false; }
+        const cible = sc.scrollHeight - sc.clientHeight;
+        const reste = cible - sc.scrollTop;
+        if (reste <= 1) { ecrireScroll(sc, cible); glissementActif = false; return false; }
+        // Constante de temps : au bout de smoothScrollMs, 98 % du trajet est fait.
+        const tau = Math.max(16, CONFIG.smoothScrollMs / 4);
+        // Plancher d'un pixel : un déplacement fractionnaire n'est pas appliqué par le
+        // navigateur, et la course exponentielle finit forcément par en demander un.
+        // Sans ce plancher, le suiveur se fige à quelques pixels du bas — mesuré.
+        const pas = Math.max(1, reste * (1 - Math.exp(-dt / tau)));
+        ecrireScroll(sc, sc.scrollTop + pas);
+        return true;
+    };
+
+    const avancerBoucle = (maintenant) => {
+        frame = null;
+        dansLaBoucle = true;
+        // Borné des deux côtés : un onglet en arrière-plan ne reçoit plus d'images et
+        // l'écart accumulé ferait sauter le chat d'un bond au retour ; un écart nul
+        // ferait tourner la boucle sans jamais avancer.
+        const dt = Math.min(100, Math.max(1, maintenant - horodatage));
+        horodatage = maintenant;
+
+        const encoreDesMessages = relacherEnAttente(maintenant);
+        const encoreDuTrajet = avancerGlissement(dt);
+        dansLaBoucle = false;
+        if (encoreDesMessages || encoreDuTrajet) {
+            frame = requestAnimationFrame(avancerBoucle);
+        }
     };
 
     const mesurerCollage = (sc) => {
         if (!sc) return true;
         // Pendant un glissement, le chat n'est pas au bas mais il y va : le compter
         // comme décroché arrêterait le suivi dès la première animation.
-        if (animation) return true;
+        if (glissementActif) return true;
         return sc.scrollHeight - sc.scrollTop - sc.clientHeight <= SCROLL_EPSILON;
-    };
-
-    /**
-     * Rejoint le bas en glissant. La cible est relue à chaque pas : dans un chat rapide,
-     * de nouveaux messages arrivent pendant l'animation et la distance change en route.
-     * La durée est proportionnelle à la distance — un message isolé ne doit pas mettre
-     * une seconde et demie à monter — et plafonnée au réglage.
-     */
-    const glisserVersBas = (sc) => {
-        const duree = CONFIG.smoothScrollMs;
-        const pas = Math.max(8, CONFIG.messageBatchMs || 16);
-        const cible = () => sc.scrollHeight - sc.clientHeight;
-        const distance = cible() - sc.scrollTop;
-        if (distance <= SCROLL_EPSILON) { ecrireScroll(sc, cible()); return; }
-
-        if (animation) return;   // déjà en route : elle relira la cible d'elle-même
-        const depart = sc.scrollTop;
-        const debut = performance.now();
-        // Une distance d'une hauteur d'écran prend la durée maximale ; en dessous, la
-        // durée diminue d'autant, sans jamais descendre sous un pas d'animation.
-        const etendue = Math.max(1, sc.clientHeight);
-        const dureeUtile = Math.max(pas, Math.min(duree, duree * (distance / etendue)));
-
-        animation = {
-            timer: setInterval(() => {
-                if (!sc.isConnected) { arreterAnimation(); return; }
-                const t = Math.min(1, (performance.now() - debut) / dureeUtile);
-                const adouci = 1 - Math.pow(1 - t, 3);
-                ecrireScroll(sc, depart + (cible() - depart) * adouci);
-                if (t >= 1) { arreterAnimation(); ecrireScroll(sc, cible()); }
-            }, pas)
-        };
     };
 
     const recollerEnBas = (sc) => {
         if (!sc) return;
-        if (CONFIG.smoothScrollMs > 0) { glisserVersBas(sc); return; }
+        if (CONFIG.smoothScrollMs > 0) {
+            if (sc.scrollHeight - sc.clientHeight - sc.scrollTop <= 0.5) return;
+            glissementActif = true;
+            demarrerBoucle();
+            return;
+        }
         ecrireScroll(sc, sc.scrollHeight);
     };
 
@@ -1645,7 +1681,7 @@
                 // Nos propres écritures ne disent rien de l'intention de lecture.
                 if (Math.abs(scroller.scrollTop - dernierEcrit) <= 1.5) return;
                 // Un geste pendant un glissement l'interrompt : on rend la main.
-                arreterAnimation();
+                arreterGlissement();
                 colleEnBas = scroller.scrollHeight - scroller.scrollTop
                     - scroller.clientHeight <= SCROLL_EPSILON;
             }, { passive: true });
@@ -1676,23 +1712,25 @@
     // =========================================================================
     const AFFICHAGE_MAX_EN_ATTENTE = 40;
     const enAttenteAffichage = [];
-    let timerAffichage = null;
+    let dernierRelache = 0;
 
-    const relacherTout = () => {
-        while (enAttenteAffichage.length) {
-            const line = enAttenteAffichage.shift();
-            if (line.isConnected) line.classList.remove('btc-differe');
-        }
-        if (timerAffichage) { clearInterval(timerAffichage); timerAffichage = null; }
+    const relacherLigne = (line) => {
+        if (line.isConnected) line.classList.remove('btc-differe');
     };
 
-    const relacherSuivant = () => {
-        const line = enAttenteAffichage.shift();
-        if (line && line.isConnected) {
-            line.classList.remove('btc-differe');
-            if (colleEnBas) recollerEnBas(getScroller());
-        }
-        if (!enAttenteAffichage.length) { clearInterval(timerAffichage); timerAffichage = null; }
+    const relacherTout = () => {
+        while (enAttenteAffichage.length) relacherLigne(enAttenteAffichage.shift());
+    };
+
+    /** Appelé par la boucle. Rend vrai tant qu'il reste des lignes à relâcher. */
+    const relacherEnAttente = (maintenant) => {
+        if (!enAttenteAffichage.length) return false;
+        if (maintenant - dernierRelache < CONFIG.messageBatchMs) return true;
+        dernierRelache = maintenant;
+        relacherLigne(enAttenteAffichage.shift());
+        // Le contenu vient de grandir : le suiveur doit repartir vers le nouveau bas.
+        if (colleEnBas) recollerEnBas(getScroller());
+        return enAttenteAffichage.length > 0;
     };
 
     const differerAffichage = (node) => {
@@ -1706,8 +1744,9 @@
         if (node.classList.contains('btc-differe')) return;
         node.classList.add('btc-differe');
         enAttenteAffichage.push(node);
+        // Au-delà de ce retard, étaler davantage ferait décrocher l'affichage du direct.
         if (enAttenteAffichage.length > AFFICHAGE_MAX_EN_ATTENTE) { relacherTout(); return; }
-        if (!timerAffichage) timerAffichage = setInterval(relacherSuivant, CONFIG.messageBatchMs);
+        demarrerBoucle();
     };
 
     const flush = () => {
@@ -1875,7 +1914,14 @@
                 tailleMessage: body ? getComputedStyle(body).fontSize : '(aucun message à l\'écran)',
                 reponsesTraitees: document.querySelectorAll('.btc-reply').length,
                 emotesIndexees: emoteIndex.size,
-                cssInjecte: !!document.getElementById('btc-styles')
+                cssInjecte: !!document.getElementById('btc-styles'),
+                // Rendu progressif : de quoi voir d'un coup d'œil si une boucle reste
+                // en route ou si des lignes sont restées masquées.
+                glissementMs: CONFIG.smoothScrollMs,
+                batchMs: CONFIG.messageBatchMs,
+                glissementEnCours: glissementActif,
+                boucleActive: frame !== null,
+                lignesEnAttente: enAttenteAffichage.length
             };
             console.table(info);
             return info;
