@@ -426,9 +426,20 @@ const r = await page.evaluate(() => {
             // qui ferait constater un écart là où le rendu est juste.
             const ecart = Math.round(
                 (em.getBoundingClientRect().bottom - repere.getBoundingClientRect().bottom) * 10) / 10;
+            // Espace réservé au-dessus, comme FrankerFaceZ : la boîte de l'enveloppe
+            // dépasse l'image d'autant, sans déplacer l'image elle-même.
+            // Mesuré sur la propriété, pas sur la hauteur de la boîte : celle-ci
+            // englobe aussi la descente propre de l'enveloppe, qui n'a rien à y voir.
+            const reserve = getComputedStyle(essai).paddingTop;
+            // Un emoji doit en être exempté, sinon une ligne d'emoji grandit sans raison.
+            const essaiEmoji = essai.cloneNode(true);
+            essaiEmoji.querySelector('img').className = 'seventv-emote seventv-emoji';
+            hote.appendChild(essaiEmoji);
+            const reserveEmoji = getComputedStyle(essaiEmoji).paddingTop;
+            essaiEmoji.remove();
             repere.remove();
             essai.remove();
-            return ecart;
+            return { ecart, reserve, reserveEmoji };
         })(),
         etiquettesHighlight: qa('[data-seventv-custom-highlight-label]').length,
         // 7TV réserve 1.3rem au-dessus pour son étiquette, 0.75rem en dessous.
@@ -1059,7 +1070,11 @@ const alignVsRival = await page.evaluate(async () => {
 // Écart entre le bas de l'emote et la ligne d'écriture : nul quand elle est posée
 // dessus, plusieurs pixels dès qu'un alignement centré s'applique.
 check('emotes posées sur la ligne d\'écriture',
-    r.alignementEmote, (v) => v !== null && Math.abs(v) <= 0.5);
+    r.alignementEmote, (v) => v && Math.abs(v.ecart) <= 0.5);
+check('espace réservé au-dessus de l\'emote, comme FrankerFaceZ',
+    r.alignementEmote, (v) => v && v.reserve === '5px');
+check('emoji exemptés de cet espace, comme FrankerFaceZ',
+    r.alignementEmote, (v) => v && v.reserveEmoji === '0px');
 check('alignement tenu face à un !important injecté après nous', alignVsRival, 'baseline');
 
 check('taille tenue face à un !important concurrent', vsTwitch.fontSize, TAILLE_CITATION);

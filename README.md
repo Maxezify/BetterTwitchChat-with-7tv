@@ -18,7 +18,7 @@ Userscript Tampermonkey qui rend le chat de Twitch plus lisible, compatible avec
 | **Gifts multiples regroupés** | « X offre 50 abonnements » absorbe les « X a offert un abonnement à Y » qui suivent et affiche la liste des destinataires sur une seule notice. |
 | **Chat toujours collé en bas** | Dérouler une citation agrandit le message *après* que Twitch a fait défiler : le bas du nouveau message passait sous le pli. Le script remet le chat au bas une fois la ligne à sa taille définitive — et seulement si le chat y était déjà, pour ne jamais interrompre une lecture en cours dans l'historique. |
 | **Affichage progressif** | Deux fonctions absentes de la nouvelle extension 7TV. *Message Batching* relâche les messages un par un plutôt que par paquets — réglé à une ligne par image, le plus rapide qui reste progressif. Sous une rafale, le rythme **accélère** au lieu de renoncer : le retard se résorbe en un temps fixe et aucun message ne surgit sans transition. *Smooth scroll chat* (1500 ms) fait glisser le chat vers le bas au lieu d'y sauter, **en s'adaptant à la cadence** : un suiveur à vitesse fixe traîne proportionnellement au débit, et sur un chat nourri le retard se creuse sans fin — mesuré à 2355 px sur une fenêtre de 300. La vitesse se resserre juste assez pour maintenir le retard sous le quart de la hauteur visible, sans jamais redevenir un saut. Les deux avancent dans une **seule boucle calée sur la cadence de l'écran** : une minuterie à intervalle fixe produit des à-coups dès qu'elle tombe à côté d'un rafraîchissement. Le glissement suit une approche exponentielle — la vitesse décroît avec la distance — donc l'arrivée est douce et la cible peut s'éloigner en cours de route sans provoquer d'à-coup. |
-| **Emotes sur la ligne de base** | Comme le réglage « Ligne de base (comme BTTV) » de FrankerFaceZ : le bas de l'emote se pose sur la ligne d'écriture, les jambages des « p q g » passant dessous. 7TV enveloppe chaque emote dans `span.seventv-emote-anchor > span.seventv-emote-container` — c'est **l'enveloppe** qui constitue la boîte alignée sur la ligne, régler l'image seule ne déplace rien. Réglable par `emoteAlign`. |
+| **Emotes sur la ligne de base** | Repris de FrankerFaceZ (`chat.lines.emote-alignment` = *Baseline (BTTV-Like)*), dont l'implémentation déclare deux choses : `vertical-align: baseline` et `padding-top: 5px`, avec les emoji exemptés du second. Le bas de l'emote se pose sur la ligne d'écriture, les jambages des « p q g » passant dessous, et l'espace réservé au-dessus évite qu'une emote haute morde la ligne précédente. Leur sélecteur vise l'image ; sur le DOM de 7TV, qui enveloppe chaque emote dans `span.seventv-emote-anchor > span.seventv-emote-container`, cela reste **sans effet** — c'est l'enveloppe qui porte la boîte alignée. Les deux règles y sont donc portées, l'espace sur l'enveloppe pour ne pas désolidariser les emotes superposées. Réglable par `emoteAlign` et `emotePaddingTop`. |
 | **Couleurs de grade 7TV** | Si 7TV colore un message (highlight par badge modo/VIP, first-time chatter, règle personnalisée), sa barre de couleur est laissée telle quelle : le script n'en superpose pas une seconde, qui doublerait l'épaisseur du trait. |
 
 ## Installation
@@ -67,6 +67,7 @@ messageBatchMs // délai minimal entre deux messages affichés
 smoothScrollMs // durée du glissement vers le bas (0 = saut instantané)
 smoothScrollMaxLag // retard maximal toléré, en fraction de la hauteur visible
 emoteAlign   // alignement vertical des emotes ('baseline', null pour n'y pas toucher)
+emotePaddingTop // espace réservé au-dessus de l'emote (valeur de FrankerFaceZ)
 separators   // trait de séparation entre les messages (désactivé : 7TV en pose un)
 hideHighlightLabel // retire l'étiquette des règles « Custom Highlights » de 7TV
 highlightPaddingTop // espace au-dessus des messages relevés par une de ces règles
@@ -157,7 +158,7 @@ styled-components changeant à chaque build de Twitch.
 
 - [`tools/7tv-dom-recorder.user.js`](tools/7tv-dom-recorder.user.js) — capture la
   structure réelle du chat pour diagnostiquer une future casse.
-- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 131 vérifications du script contre du
+- [`tools/tests/run.mjs`](tools/tests/run.mjs) — 133 vérifications du script contre du
   DOM Twitch réellement capturé, exécutées dans Chromium.
 
 Voir [`tools/README.md`](tools/README.md).

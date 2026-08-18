@@ -2,7 +2,7 @@
 
 ## `tests/run.mjs` — suite de tests
 
-131 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
+133 vérifications du rendu de `BetterTwitchChat.js`, exécutées dans Chromium via
 Playwright, contre du DOM Twitch **réellement capturé** (`tests/fixtures/lines.json`,
 pseudos remplacés par des placeholders).
 
@@ -257,6 +257,14 @@ Autres constats utiles :
   charger** : sinon Chrome rend son texte alternatif, dont la boîte ne suit pas les règles
   d'un élément remplacé. En cas de doute, une capture d'écran tranche plus vite qu'un
   raisonnement sur les lignes de base.
+- L'implémentation de FrankerFaceZ pour ce réglage
+  (`src/sites/twitch-twilight/modules/css_tweaks/styles/emote-alignment-baseline.scss`)
+  tient en deux déclarations : `vertical-align: baseline` sur l'image et
+  `padding-top: 5px`, les emoji (`.ffz-emoji`) étant exemptés du second. **Recopiée telle
+  quelle, elle ne produit rien sur un chat équipé de 7TV** : leur sélecteur vise l'image,
+  dont l'alignement est intercepté par les enveloppes. Vérifié côte à côte : le rendu est
+  identique à celui sans aucune règle. Reproduire un comportement d'une autre extension
+  demande donc de transposer sur la structure réelle, pas de recopier ses sélecteurs.
 - Un suiveur à constante de temps fixe **traîne proportionnellement au débit** : en
   régime établi, son retard vaut vitesse × constante. Sur un chat nourri, le bas n'est
   donc jamais rejoint — mesuré à 2355 px de retard sur une fenêtre de 300 px. Il faut

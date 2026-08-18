@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.22.0
+// @version      15.23.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -46,7 +46,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.22.0';
+    const VERSION = '15.23.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -148,6 +148,11 @@
         // l'emote sur la ligne d'écriture, comme BTTV et FrankerFaceZ : elle se trouve
         // alors à la même hauteur que le texte. Mettre null pour ne pas y toucher.
         emoteAlign: 'baseline',
+        // Espace réservé au-dessus de l'emote. Valeur reprise telle quelle de
+        // FrankerFaceZ, qui l'ajoute avec le même alignement pour éviter qu'une emote
+        // haute vienne mordre la ligne précédente. Les emoji en sont exemptés, comme
+        // chez eux. Mettre null pour ne pas en réserver.
+        emotePaddingTop: '5px',
 
         separators: false,
         // Retire l'étiquette que 7TV accroche aux messages relevés par une règle
@@ -748,6 +753,14 @@
         ${CONFIG.emoteAlign ? (SEL.emoteBox + ',' + SEL.emote).split(',')
             .map(sel => `.chat-line__message ${sel.trim()}`).join(',\n        ')
             + ` {\n            vertical-align: ${CONFIG.emoteAlign} !important;\n        }` : ''}
+        /* Espace au-dessus, comme FrankerFaceZ. Posé sur l'enveloppe et non sur l'image :
+           7TV superpose les emotes « zero-width » à l'intérieur de cette enveloppe, et
+           décaler la seule image de base les désolidariserait. Les emoji en sont exemptés,
+           comme chez FFZ — sans quoi une ligne d'emoji grandirait sans raison. */
+        ${CONFIG.emotePaddingTop ? SEL.emoteBox.split(',')
+            .map(sel => `.chat-line__message ${sel.trim()}:not(:has(img.seventv-emoji))`)
+            .join(',\n        ')
+            + ` {\n            padding-top: ${CONFIG.emotePaddingTop} !important;\n        }` : ''}
         `;
     };
 
