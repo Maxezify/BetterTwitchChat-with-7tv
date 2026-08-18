@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BetterTwitchChat (+ 7TV)
 // @namespace    https://github.com/Maxezify/BetterTwitchChat-with-7tv
-// @version      15.23.0
+// @version      15.24.0
 // @description  Réponses lisibles en entier (emotes incluses), notices sub/prime/gift compactées, regroupement des gifts multiples. Compatible chat Twitch natif + nouvelle extension 7TV.
 // @author       Maxezify
 // @match        https://www.twitch.tv/*
@@ -46,7 +46,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '15.23.0';
+    const VERSION = '15.24.0';
 
     // =========================================================================
     // CONFIGURATION — tout ce qui se règle sans toucher au reste du fichier
@@ -143,11 +143,20 @@
         // accélère de lui-même quand le chat s'emballe : sans cela, un flot soutenu
         // creuse un retard qui grandit sans fin et le bas du chat n'est jamais rejoint.
         smoothScrollMaxLag: 0.25,
+        // Déplacement maximal par image, en fraction de la hauteur visible. C'est ce qui
+        // garantit la continuité : sans plafond, l'accélération ci-dessus finit par
+        // produire des bonds de plusieurs écrans en une seule image — mesuré à 1823 px.
+        // Au-delà de ce plafond, le retard grandit pendant la bourrasque et se résorbe
+        // ensuite ; le mouvement, lui, ne saute jamais.
+        smoothScrollMaxStep: 0.25,
 
-        // Alignement vertical des emotes dans les messages. 'baseline' pose le bas de
-        // l'emote sur la ligne d'écriture, comme BTTV et FrankerFaceZ : elle se trouve
-        // alors à la même hauteur que le texte. Mettre null pour ne pas y toucher.
-        emoteAlign: 'baseline',
+        // Alignement vertical des emotes ET des badges. Une seule valeur pour les deux :
+        // réglés séparément, ils avaient dérivé de 1,95 px l'un par rapport à l'autre et
+        // l'emote flottait au-dessus des badges. 'baseline' pose le bas sur la ligne
+        // d'écriture, comme BTTV et FrankerFaceZ ; la valeur retenue descend d'un poil
+        // sous cette ligne, ce qui aligne exactement sur les badges de Twitch. Mettre
+        // null pour ne toucher à rien.
+        emoteAlign: '-0.15em',
         // Espace réservé au-dessus de l'emote. Valeur reprise telle quelle de
         // FrankerFaceZ, qui l'ajoute avec le même alignement pour éviter qu'une emote
         // haute vienne mordre la ligne précédente. Les emoji en sont exemptés, comme
@@ -743,24 +752,36 @@
         .btc-differe { display: none !important; }
 
         /* ---------- Alignement emotes / badges ---------- */
-        .chat-line__message .chat-badge {
-            vertical-align: -0.15em !important;
+        /* Une seule valeur pour les emotes et les badges, sinon les deux dérivent : ils
+           étaient réglés séparément et l'emote flottait 1,95 px au-dessus des badges.
+
+           Le retrait n'est posé que sur la boîte la plus externe. 7TV empile enveloppe
+           sur enveloppe autour de chaque emote, et un décalage appliqué à chaque niveau
+           s'additionne — mesuré : le même réglage partout doublait l'écart au lieu de
+           l'annuler. Les niveaux intérieurs sont donc remis à plat sur la ligne de base,
+           pour ne rien ajouter au retrait de l'enveloppe qui les porte. */
+        ${CONFIG.emoteAlign ? (() => {
+            const boites = SEL.emoteBox;
+            const tout = `${SEL.emoteBox},${SEL.emote},.chat-badge`;
+            return `
+        .chat-line__message :is(${tout}) {
+            vertical-align: ${CONFIG.emoteAlign} !important;
         }
-        /* Emotes posées sur la ligne de base, comme BTTV et FrankerFaceZ. 7TV impose ses
-           dimensions en style inline important, mais pas l'alignement : celui-ci nous
-           reste accessible. Le sélecteur de type porte la spécificité à (0,2,1), au-dessus
-           des classes de 7TV et de Twitch, sans dépendre d'un hachage. */
-        ${CONFIG.emoteAlign ? (SEL.emoteBox + ',' + SEL.emote).split(',')
-            .map(sel => `.chat-line__message ${sel.trim()}`).join(',\n        ')
-            + ` {\n            vertical-align: ${CONFIG.emoteAlign} !important;\n        }` : ''}
-        /* Espace au-dessus, comme FrankerFaceZ. Posé sur l'enveloppe et non sur l'image :
-           7TV superpose les emotes « zero-width » à l'intérieur de cette enveloppe, et
-           décaler la seule image de base les désolidariserait. Les emoji en sont exemptés,
-           comme chez FFZ — sans quoi une ligne d'emoji grandirait sans raison. */
-        ${CONFIG.emotePaddingTop ? SEL.emoteBox.split(',')
-            .map(sel => `.chat-line__message ${sel.trim()}:not(:has(img.seventv-emoji))`)
-            .join(',\n        ')
-            + ` {\n            padding-top: ${CONFIG.emotePaddingTop} !important;\n        }` : ''}
+        /* Niveaux intérieurs remis à plat. Leur sélecteur est plus spécifique que celui
+           ci-dessus, ils reprennent donc la main quel que soit l'ordre. */
+        .chat-line__message :is(${boites}) :is(${boites},${SEL.emote}) {
+            vertical-align: baseline !important;
+        }`;
+        })() : ''}
+        /* Espace au-dessus, comme FrankerFaceZ. Posé sur l'enveloppe externe et non sur
+           l'image : 7TV superpose les emotes « zero-width » à l'intérieur de l'enveloppe,
+           et décaler la seule image de base les désolidariserait. Les emoji en sont
+           exemptés, comme chez FFZ — sans quoi une ligne d'emoji grandirait sans raison. */
+        ${CONFIG.emotePaddingTop ? `
+        .chat-line__message :is(${SEL.emoteBox}):not(:is(${SEL.emoteBox}) *):not(:has(img.seventv-emoji)) {
+            padding-top: ${CONFIG.emotePaddingTop} !important;
+        }` : ''}
+
         `;
     };
 
@@ -1666,7 +1687,12 @@
         // Plancher d'un pixel : un déplacement fractionnaire n'est pas appliqué par le
         // navigateur, et la course exponentielle finit forcément par en demander un.
         // Sans ce plancher, le suiveur se fige à quelques pixels du bas — mesuré.
-        const pas = Math.max(1, reste * (1 - Math.exp(-dt / tau)));
+        // Plafond de déplacement : le mouvement reste continu quoi qu'il arrive. Sans
+        // lui, l'accélération ci-dessus produit des bonds de plusieurs écrans par image
+        // dès que le chat s'emballe — ce qui rejoint le bas, mais n'est plus un
+        // glissement. Rapporté au temps écoulé, donc identique à toute cadence d'écran.
+        const plafond = Math.max(4, sc.clientHeight * CONFIG.smoothScrollMaxStep * dt / 16.7);
+        const pas = Math.min(plafond, Math.max(1, reste * (1 - Math.exp(-dt / tau))));
         ecrireScroll(sc, sc.scrollTop + pas);
         return true;
     };

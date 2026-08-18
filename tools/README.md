@@ -265,11 +265,25 @@ Autres constats utiles :
   dont l'alignement est intercepté par les enveloppes. Vérifié côte à côte : le rendu est
   identique à celui sans aucune règle. Reproduire un comportement d'une autre extension
   demande donc de transposer sur la structure réelle, pas de recopier ses sélecteurs.
+- Deux exigences du glissement se contredisent, et il faut choisir consciemment : rester
+  collé au bas quand le contenu arrive vite, et se déplacer sans à-coup. Mesuré sur une
+  fenêtre de 400 px, sans plafond par image : pas médian de 466 px et pointe à 1823 px —
+  quatre écrans en une image. Avec un plafond au quart de la hauteur visible, le
+  déplacement reste continu ; un gros stream (~40 msg/s) est suivi sans retard, un pic à
+  ~80 msg/s accumule un retard qui se résorbe ensuite. Un plafond deux fois plus bas
+  (0.12) est plus doux à l'œil mais laisse 12 000 px de retard sur ce même pic.
 - Un suiveur à constante de temps fixe **traîne proportionnellement au débit** : en
   régime établi, son retard vaut vitesse × constante. Sur un chat nourri, le bas n'est
   donc jamais rejoint — mesuré à 2355 px de retard sur une fenêtre de 300 px. Il faut
   mesurer la croissance du contenu et resserrer la constante juste assez pour borner ce
   retard ; le glissement accélère alors avec la cadence sans jamais redevenir un saut.
+- Les enveloppes d'emote de 7TV s'**empilent** : appliquer le même `vertical-align` à
+  chaque niveau ne le pose pas une fois, il s'**additionne** — mesuré, le même réglage
+  partout doublait l'écart au lieu de l'annuler. Seule la boîte externe doit le porter,
+  les niveaux intérieurs étant remis sur la ligne de base.
+- Les badges (`.chat-badge`) sont des images sans enveloppe, alignés directement. Emotes
+  et badges doivent donc partager **une seule valeur** : réglés séparément, ils dérivent
+  — ici de 1,95 px, assez pour que l'emote paraisse flotter au-dessus des badges.
 - Les réglages actifs sont lisibles dans la liste de classes de `<html>`
   (`seventv-chat-message-style-full-width`, `seventv-chat-mention-highlight-enabled`…).
 - 7TV applique aux emotes un `style` inline `width/max-width/max-height` en `!important`.

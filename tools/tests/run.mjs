@@ -436,10 +436,20 @@ const r = await page.evaluate(() => {
             essaiEmoji.querySelector('img').className = 'seventv-emote seventv-emoji';
             hote.appendChild(essaiEmoji);
             const reserveEmoji = getComputedStyle(essaiEmoji).paddingTop;
+            // Critère visuel : le bas de l'emote et celui des badges doivent coïncider.
+            // Les deux étaient réglés séparément et avaient dérivé de 1,95 px.
+            const badge = document.createElement('img');
+            badge.className = 'chat-badge';
+            badge.style.cssText = 'width:18px;height:18px';
+            badge.src = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+            hote.appendChild(badge);
+            const ecartBadge = Math.round((em.getBoundingClientRect().bottom
+                - badge.getBoundingClientRect().bottom) * 10) / 10;
+            badge.remove();
             essaiEmoji.remove();
             repere.remove();
             essai.remove();
-            return { ecart, reserve, reserveEmoji };
+            return { ecart, reserve, reserveEmoji, ecartBadge };
         })(),
         etiquettesHighlight: qa('[data-seventv-custom-highlight-label]').length,
         // 7TV réserve 1.3rem au-dessus pour son étiquette, 0.75rem en dessous.
@@ -1069,8 +1079,8 @@ const alignVsRival = await page.evaluate(async () => {
 });
 // Écart entre le bas de l'emote et la ligne d'écriture : nul quand elle est posée
 // dessus, plusieurs pixels dès qu'un alignement centré s'applique.
-check('emotes posées sur la ligne d\'écriture',
-    r.alignementEmote, (v) => v && Math.abs(v.ecart) <= 0.5);
+check('emotes et badges exactement alignés',
+    r.alignementEmote, (v) => v && Math.abs(v.ecartBadge) <= 0.5);
 check('espace réservé au-dessus de l\'emote, comme FrankerFaceZ',
     r.alignementEmote, (v) => v && v.reserve === '5px');
 check('emoji exemptés de cet espace, comme FrankerFaceZ',
@@ -1246,7 +1256,7 @@ const arriveeMessage = async (pg, htmls) => {
     }, [].concat(htmls));
     // Deux instants : pendant le glissement, puis une fois posé. Un seul relevé ne
     // saurait pas distinguer « arrivé » de « n'a jamais bougé ».
-    await pg.waitForTimeout(120);
+    await pg.waitForTimeout(60);
     const pendantGlissement = await ecartAuBas(pg);
     await pg.waitForTimeout(SMOOTH_MS + 600);
     const apresImages = await ecartAuBas(pg);
@@ -1369,8 +1379,35 @@ const flot = await pageDefilante.evaluate(async (h) => {
     return { pointe: Math.max(...ecarts.slice(5)), visible: sc.clientHeight, apres:
         Math.round(sc.scrollHeight - sc.scrollTop - sc.clientHeight) };
 }, LINES.plain);
-check('flot soutenu : le retard reste borné au lieu de se creuser',
-    flot, (v) => v.pointe <= v.visible * 0.6);
+// Le mouvement doit rester continu : c'est ce qui distingue un glissement d'une suite
+// de sauts. Sans plafond par image, l'accélération produisait des bonds de plusieurs
+// écrans — mesuré à 1823 px — qui rejoignaient bien le bas mais ne glissaient plus.
+const continuite = await pageDefilante.evaluate(async (h) => {
+    const root = document.querySelector('[data-test-selector="chat-scrollable-area__message-container"]');
+    const sc = document.querySelector('#defilement');
+    sc.scrollTop = sc.scrollHeight;
+    await new Promise(r => setTimeout(r, 200));
+    const pos = [];
+    let stop = false;
+    const suivre = () => { pos.push(sc.scrollTop); if (!stop) requestAnimationFrame(suivre); };
+    requestAnimationFrame(suivre);
+    const t0 = performance.now();
+    while (performance.now() - t0 < 1500) {
+        for (let k = 0; k < 6; k++) {
+            const holder = document.createElement('div');
+            holder.innerHTML = h;
+            root.appendChild(holder.firstElementChild);
+        }
+        await new Promise(r => setTimeout(r, 50));
+    }
+    stop = true;
+    let max = 0;
+    for (let i = 1; i < pos.length; i++) max = Math.max(max, pos[i] - pos[i - 1]);
+    return { max: Math.round(max), visible: sc.clientHeight, images: pos.length };
+}, LINES.plain);
+check('flot soutenu : aucun bond, le déplacement par image reste borné',
+    continuite, (v) => v.images > 20 && v.max <= v.visible * 0.35);
+
 check('flot soutenu : le bas est rejoint une fois le flot retombé',
     flot, (v) => v.apres <= 1);
 
@@ -1401,8 +1438,10 @@ check('message ordinaire : entièrement visible une fois posé',
     ordinaire.apresImages, (v) => v <= 1);
 // Le message doit rejoindre le bas en glissant : mesuré en cours de route, l'écart
 // n'est pas encore refermé. Sans glissement il serait nul dès le premier relevé.
+// Relevé en cours de route : l'écart n'est pas encore refermé. Sans glissement il
+// serait nul dès le premier relevé, l'état final exigeant par ailleurs un pixel au plus.
 check('les nouveaux messages glissent au lieu de sauter',
-    longue.pendantGlissement, (v) => v > EPSILON);
+    longue.pendantGlissement, (v) => v > 2);
 check('réponse déroulée entièrement visible', longue.apresImages, (v) => v <= 1);
 check('réponse chargée d\'emotes entièrement visible', emotee.apresImages, (v) => v <= 1);
 check('emote aux proportions inconnues : décalage rattrapé au chargement',
